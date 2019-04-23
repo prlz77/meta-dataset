@@ -62,47 +62,47 @@ def main(argv):
   # This will be used to build the corresponding DatasetConverter object.
   dataset_name_to_converter_and_args = {
       # Datasets in the same order as reported in the article.
-      'ilsvrc_2012': (dataset_to_records.ImageNetConverter,
+      'ilsvrc_2012': (dataset_to_hdf5.ImageNetConverter,
                       ConverterArgs(
                           data_root=FLAGS.ilsvrc_2012_data_root,
                           long_name='ImageNet ILSVRC-2012')),
-      'omniglot': (dataset_to_records.OmniglotConverter,
+      'omniglot': (dataset_to_hdf5.OmniglotConverter,
                    ConverterArgs(
                        data_root=FLAGS.omniglot_data_root,
                        long_name='Omniglot')),
-      'aircraft': (dataset_to_records.AircraftConverter,
+      'aircraft': (dataset_to_hdf5.AircraftConverter,
                    ConverterArgs(
                        data_root=FLAGS.aircraft_data_root,
                        long_name='FGVC-Aircraft Benchmark')),
-      'cu_birds': (dataset_to_records.CUBirdsConverter,
+      'cu_birds': (dataset_to_hdf5.CUBirdsConverter,
                    ConverterArgs(
                        data_root=FLAGS.cu_birds_data_root,
                        long_name='CU Birds')),
-      'dtd': (dataset_to_records.DTDConverter,
+      'dtd': (dataset_to_hdf5.DTDConverter,
               ConverterArgs(
                   data_root=FLAGS.dtd_data_root,
                   long_name='Describable Textures Dataset')),
-      'quickdraw': (dataset_to_records.QuickdrawConverter,
+      'quickdraw': (dataset_to_hdf5.QuickdrawConverter,
                     ConverterArgs(
                         data_root=FLAGS.quickdraw_data_root,
                         long_name='Quick, Draw!')),
-      'fungi': (dataset_to_records.FungiConverter,
+      'fungi': (dataset_to_hdf5.FungiConverter,
                 ConverterArgs(
                     data_root=FLAGS.fungi_data_root,
                     long_name='fungi 2018 FGVCx')),
-      'vgg_flower': (dataset_to_records.VGGFlowerConverter,
+      'vgg_flower': (dataset_to_hdf5.VGGFlowerConverter,
                      ConverterArgs(
                          data_root=FLAGS.vgg_flower_data_root,
                          long_name='VGG Flower')),
-      'traffic_sign': (dataset_to_records.TrafficSignConverter,
+      'traffic_sign': (dataset_to_hdf5.TrafficSignConverter,
                        ConverterArgs(
                            data_root=FLAGS.traffic_sign_data_root,
                            long_name='Traffic Sign')),
-      'mscoco': (dataset_to_records.MSCOCOConverter,
+      'mscoco': (dataset_to_hdf5.MSCOCOConverter,
                  ConverterArgs(
                      data_root=FLAGS.mscoco_data_root, long_name='MSCOCO')),
       # Diagnostics-only dataset
-      'mini_imagenet': (dataset_to_records.MiniImageNetConverter,
+      'mini_imagenet': (dataset_to_hdf5.MiniImageNetConverter,
                         ConverterArgs(
                             data_root=FLAGS.mini_imagenet_data_root,
                             long_name='MiniImageNet')),

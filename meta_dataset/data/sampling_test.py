@@ -19,13 +19,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import unittest
 from absl.testing import parameterized
-import gin.tf
+import gin
 from meta_dataset.data import sampling
 from meta_dataset.data.dataset_spec import DatasetSpecification
 from meta_dataset.data.learning_spec import Split
+from meta_dataset.utils.argparse import argparse
 import numpy as np
-import tensorflow as tf
+
+argparse.parser.parse_args()
 
 # DatasetSpecification to use in tests
 DATASET_SPEC = DatasetSpecification(
@@ -39,6 +42,11 @@ DATASET_SPEC = DatasetSpecification(
     class_names=None,
     path=None,
     file_pattern='{}.tfrecords')
+
+def assert_contains_subset(a, b):
+    set_a = set(a)
+    set_b = set(b)
+    assert(len(set_a) == len(set_a.intersection(set_b)))
 
 # Define defaults and set Gin configuration for EpisodeDescriptionSampler
 MIN_WAYS = 5
@@ -71,7 +79,7 @@ gin.bind_parameter('none/EpisodeDescriptionSampler.min_log_weight', None)
 gin.bind_parameter('none/EpisodeDescriptionSampler.max_log_weight', None)
 
 
-class SampleNumWaysUniformlyTest(tf.test.TestCase):
+class SampleNumWaysUniformlyTest(unittest.TestCase):
   """Tests for the `sample_num_ways_uniformly` function."""
 
   def test_min_ways_respected(self):
@@ -95,7 +103,7 @@ class SampleNumWaysUniformlyTest(tf.test.TestCase):
       self.assertLessEqual(num_ways, MAX_WAYS_UPPER_BOUND)
 
 
-class SampleClassIDsUniformlyTest(tf.test.TestCase):
+class SampleClassIDsUniformlyTest(unittest.TestCase):
   """Tests for the `sample_class_ids_uniformly` function."""
 
   def test_num_ways_respected(self):
@@ -103,15 +111,15 @@ class SampleClassIDsUniformlyTest(tf.test.TestCase):
     num_ways = MIN_WAYS
     for _ in range(10):
       class_ids = sampling.sample_class_ids_uniformly(num_ways, num_classes)
-      self.assertLen(set(class_ids), num_ways)
-      self.assertLen(class_ids, num_ways)
+      self.assertEqual(len(set(class_ids)), num_ways)
+      self.assertEqual(len(class_ids), num_ways)
 
   def test_num_classes_respected(self):
     num_classes = MAX_WAYS_UPPER_BOUND
     num_ways = MIN_WAYS
     for _ in range(10):
       class_ids = sampling.sample_class_ids_uniformly(num_ways, num_classes)
-      self.assertContainsSubset(class_ids, list(range(num_classes)))
+      assert_contains_subset(class_ids, list(range(num_classes)))
 
   def test_unique_class_ids(self):
     num_classes = MAX_WAYS_UPPER_BOUND
@@ -121,7 +129,7 @@ class SampleClassIDsUniformlyTest(tf.test.TestCase):
       self.assertCountEqual(class_ids, set(class_ids))
 
 
-class ComputeNumQueryTest(tf.test.TestCase):
+class ComputeNumQueryTest(unittest.TestCase):
   """Tests for the `compute_num_query` function."""
 
   def test_max_num_query_respected(self):
@@ -142,7 +150,7 @@ class ComputeNumQueryTest(tf.test.TestCase):
       sampling.compute_num_query(images_per_class, max_num_query=MAX_NUM_QUERY)
 
 
-class SampleSupportSetSizeTest(tf.test.TestCase):
+class SampleSupportSetSizeTest(unittest.TestCase):
   """Tests for the `sample_support_set_size` function."""
 
   def test_max_support_set_size_respected(self):
@@ -163,7 +171,7 @@ class SampleSupportSetSizeTest(tf.test.TestCase):
           max_support_set_size=len(num_remaining_per_class) - 1)
 
 
-class SampleNumSupportPerClassTest(tf.test.TestCase):
+class SampleNumSupportPerClassTest(unittest.TestCase):
   """Tests for the `sample_num_support_per_class` function."""
 
   def test_support_set_size_respected(self):
@@ -217,7 +225,7 @@ class SampleNumSupportPerClassTest(tf.test.TestCase):
           max_log_weight=MAX_LOG_WEIGHT)
 
 
-class EpisodeDescrSamplerErrorTest(parameterized.TestCase, tf.test.TestCase):
+class EpisodeDescrSamplerErrorTest(parameterized.TestCase, unittest.TestCase):
   """Episode sampler should verify args when ways/shots are sampled."""
   dataset_spec = DATASET_SPEC
   split = Split.VALID
@@ -267,7 +275,7 @@ class EpisodeDescrSamplerErrorTest(parameterized.TestCase, tf.test.TestCase):
           **kwargs)
 
 
-class EpisodeDescrSamplerTest(tf.test.TestCase):
+class EpisodeDescrSamplerTest(unittest.TestCase):
   """Tests EpisodeDescriptionSampler defaults.
 
   This class provides some tests to be run by inherited classes.
@@ -449,7 +457,7 @@ class FixedWaysEpisodeDescrSamplerTest(EpisodeDescrSamplerTest):
   def test_num_ways(self):
     for _ in range(10):
       episode_description = self.sampler.sample_episode_description()
-      self.assertLen((episode_description), self.num_ways)
+      self.assertEqual(len(episode_description), self.num_ways)
 
   def test_ways_too_big(self):
     """Asserts failure if more ways than classes are available."""
@@ -481,7 +489,7 @@ class FixedEpisodeDescrSamplerTest(FixedShotsEpisodeDescrSamplerTest,
                                      self.num_ways * self.num_query)
 
 
-class ChunkSizesTest(tf.test.TestCase):
+class ChunkSizesTest(unittest.TestCase):
   """Tests the boundaries of compute_chunk_sizes."""
 
   def setUp(self):

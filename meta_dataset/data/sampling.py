@@ -28,7 +28,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import gin.tf
+import gin
 from meta_dataset.data import dataset_spec as dataset_spec_lib
 from meta_dataset.data import imagenet_specification
 import numpy as np

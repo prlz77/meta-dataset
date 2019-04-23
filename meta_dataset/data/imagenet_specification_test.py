@@ -21,8 +21,11 @@ from __future__ import print_function
 
 from meta_dataset.data import imagenet_specification as imagenet_spec
 from meta_dataset.data import learning_spec
+from meta_dataset.utils.argparse import argparse
 import numpy as np
-import tensorflow as tf
+import unittest
+
+argparse.parser.parse_args()
 
 DESIRED_TOY_NUM_VALID_CLASSES = 2
 DESIRED_TOY_NUM_TEST_CLASSES = 1
@@ -229,7 +232,7 @@ def test_get_upward_paths(graph_nodes, test_instance, subgraph_root=None):
         test_instance.assertEqual(last_node, subgraph_root)
       else:
         # Make sure the last node does not have parents (is a root).
-        test_instance.assertLen(last_node.parents, 0)
+        test_instance.assertEqual(len(last_node.parents), 0)
 
     # Now test the case where an end node is given which is a direct parent of
     # the start node.
@@ -246,7 +249,7 @@ def test_get_upward_paths(graph_nodes, test_instance, subgraph_root=None):
     num_tested += 1
 
 
-class GraphCopyTest(tf.test.TestCase):
+class GraphCopyTest(unittest.TestCase):
   """Test the correctness of imagenet_spec.copy_graph."""
 
   def validate_copy(self, graph, graph_copy):
@@ -287,7 +290,7 @@ class GraphCopyTest(tf.test.TestCase):
     self.validate_copy(toy_graph, toy_graph_copy)
 
 
-class TestGetSynsetsFromIds(tf.test.TestCase):
+class TestGetSynsetsFromIds(unittest.TestCase):
   """Test the correctness of imagenet_spec.get_synsets_from_ids()."""
 
   def test_on_toy_graph(self):
@@ -300,7 +303,7 @@ class TestGetSynsetsFromIds(tf.test.TestCase):
       self.assertEqual(wn_id, synset.wn_id)
 
 
-class SplitCreationTest(tf.test.TestCase):
+class SplitCreationTest(unittest.TestCase):
   """Test the correctness of imagenet_spec.propose_valid_test_roots."""
 
   def validate_roots(self, valid_test_roots, spanning_leaves):
@@ -329,7 +332,7 @@ class SplitCreationTest(tf.test.TestCase):
     self.assertFalse(test_wn_ids & valid_wn_ids)
     all_wn_ids = train_wn_ids | valid_wn_ids | test_wn_ids
     leaves = imagenet_spec.get_leaves(spanning_leaves.keys())
-    self.assertLen(all_wn_ids, len(leaves))  # all covered
+    self.assertEqual(len(all_wn_ids), len(leaves))  # all covered
 
   def test_toy_root_proposer(self):
     specification = create_toy_graph()
@@ -349,7 +352,7 @@ class SplitCreationTest(tf.test.TestCase):
     self.validate_splits(splits, toy_span_leaves)
 
 
-class ImagenetSpecificationTest(tf.test.TestCase):
+class ImagenetSpecificationTest(unittest.TestCase):
 
   def validate_num_span_images(self, span_leaves, num_span_images):
     # Ensure that the number of images spanned by each node is exactly the
@@ -384,8 +387,8 @@ class ImagenetSpecificationTest(tf.test.TestCase):
     # Ensure that there is no overlap between classes of different splits
     # and that combined they cover all ILSVRC 2012 classes
     all_classes = train_classes + valid_classes + test_classes
-    self.assertLen(set(all_classes), 1000)  # all covered
-    self.assertLen(set(all_classes), len(all_classes))  # no duplicates
+    self.assertEqual(len(set(all_classes)), 1000)  # all covered
+    self.assertEqual(len(set(all_classes)), len(all_classes))  # no duplicates
 
   def test_imagenet_specification(self):
     spec = imagenet_spec.create_imagenet_specification(learning_spec.Split)
@@ -419,4 +422,4 @@ class ImagenetSpecificationTest(tf.test.TestCase):
 
 
 if __name__ == '__main__':
-  tf.test.main()
+  unittest.main()

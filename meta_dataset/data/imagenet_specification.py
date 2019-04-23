@@ -30,28 +30,19 @@ from __future__ import print_function
 import os
 import pickle as pkl
 from meta_dataset.data import imagenet_stats
+from meta_dataset.utils.argparse import argparse
 import numpy as np
-import tensorflow as tf
+import logging
 
-tf.flags.DEFINE_string(
-    'ilsvrc_2012_data_root',
-    '',
-    'Path to the root of the ImageNet data.')
+parser = argparse.parser
+parser.add_argument("--ilsvrc_2012_data_root",
+                    default='datasets/imagenet/raw/train')
+parser.add_argument("--path_to_is_a",
+                    default='datasets/imagenet/metadata/wordnet.is_a.txt')
+parser.add_argument("--path_to_words",
+                    default='datasets/imagenet/metadata/words.txt')
 
-tf.flags.DEFINE_string(
-    'path_to_is_a',
-    '',
-    'Path to the file containing is-a relationships (parent, child) pairs. '
-    'If empty, it defaults to "wordnet.is_a.txt" in ilsvrc_2012_data_root.')
-
-tf.flags.DEFINE_string(
-    'path_to_words',
-    '',
-    'Path to the file containing (synset, word description) pairs. '
-    'If empty, it defaults to "words.txt" in ilsvrc_2012_data_root.')
-
-FLAGS = tf.flags.FLAGS
-
+FLAGS = argparse.FLAGS
 
 class Synset(object):
   """A Synset object."""
@@ -340,7 +331,7 @@ def propose_valid_test_roots(spanning_leaves,
   # Sort in decreasing order of the length of the lists of spanning leaves, so
   # e.g. the node that spans the most leaves will be the first element
   spanning_leaves_sorted = sorted(
-      spanning_leaves.iteritems(), key=lambda (k, v): (len(v), k))
+      spanning_leaves.items(), key=lambda kv: (len(kv[1]), kv[0].wn_id))
   spanning_leaves_sorted.reverse()
 
   # Get the candidate roots for the validation and test sub-graphs, by finding
@@ -363,7 +354,7 @@ def propose_valid_test_roots(spanning_leaves,
 
   # For displaying the list of candidates
   for cand in valid_candidates:
-    tf.logging.info('Candidate {}, {} with {} spanning leaves'.format(
+    logging.info('Candidate {}, {} with {} spanning leaves'.format(
         cand.words, cand.wn_id, len(spanning_leaves[cand])))
 
   # Propose the first possible candidate for each of validation and test
@@ -429,7 +420,7 @@ def get_class_splits(spanning_leaves, valid_test_roots=None, **kwargs):
   # assigning each overlapping leaf to either validation or test classes
   # (roughly equally).
   overlap = [s for s in valid_wn_ids if s in test_wn_ids]
-  tf.logging.info('Size of overlap: {} leaves'.format(len(overlap)))
+  logging.info('Size of overlap: {} leaves'.format(len(overlap)))
   assign_to_valid = True
   for s in overlap:
     if assign_to_valid:
@@ -795,23 +786,23 @@ def get_num_synset_2012_images(path, synsets_2012):
     images.
   """
   if path:
-    tf.logging.info(
+    logging.info(
         'Attempting to read number of leaf images from {}...'.format(path))
-    if tf.gfile.Exists(path):
-      with tf.gfile.Open(path, 'rb') as f:
+    if os.path.exists(path):
+      with open(path, 'rb') as f:
         num_synset_2012_images = pkl.load(f)
-        tf.logging.info('Successful.')
+        logging.info('Successful.')
         return num_synset_2012_images
 
-  tf.logging.info('Unsuccessful. Deriving number of leaf images...')
+  logging.info('Unsuccessful. Deriving number of leaf images...')
   num_synset_2012_images = {}
   for s_2012 in synsets_2012:
     synset_dir = os.path.join(FLAGS.ilsvrc_2012_data_root, s_2012.wn_id)
     num_synset_2012_images[s_2012.wn_id] = len(
-        tf.gfile.ListDirectory(synset_dir))
+        os.listdir(synset_dir))
 
   if path:
-    with tf.gfile.Open(path, 'wb') as f:
+    with open(path, 'wb') as f:
       pkl.dump(num_synset_2012_images, f, protocol=pkl.HIGHEST_PROTOCOL)
 
   return num_synset_2012_images
@@ -863,7 +854,7 @@ def create_imagenet_specification(split_enum,
   path_to_words = FLAGS.path_to_words
   if not path_to_words:
     path_to_words = os.path.join(data_root, 'words.txt')
-  with tf.gfile.Open(path_to_words) as f:
+  with open(path_to_words) as f:
     for line in f:
       wn_id, words = line.rstrip().split('\t')
       synsets[wn_id] = Synset(wn_id, words, set(), set())
@@ -872,17 +863,17 @@ def create_imagenet_specification(split_enum,
   path_to_is_a = FLAGS.path_to_is_a
   if not path_to_is_a:
     path_to_is_a = os.path.join(data_root, 'wordnet.is_a.txt')
-  with tf.gfile.Open(FLAGS.path_to_is_a, 'r') as f:
+  with open(path_to_is_a, 'r') as f:
     for line in f:
       parent, child = line.rstrip().split(' ')
       synsets[parent].children.add(synsets[child])
       synsets[child].parents.add(synsets[parent])
 
   # Get the WordNet id's of the synsets of ILSVRC 2012.
-  wn_ids_2012 = tf.gfile.ListDirectory(data_root)
+  wn_ids_2012 = os.listdir(data_root)
   wn_ids_2012 = set(
       entry for entry in wn_ids_2012
-      if tf.gfile.IsDirectory(os.path.join(data_root, entry)))
+      if os.path.isdir(os.path.join(data_root, entry)))
   synsets_2012 = [s for s in synsets.values() if s.wn_id in wn_ids_2012]
   assert len(wn_ids_2012) == len(synsets_2012)
 
@@ -966,3 +957,4 @@ def create_imagenet_specification(split_enum,
   # sampling_graph if required.
   return (splits, split_num_images, sampling_graph, synsets_2012,
           num_synset_2012_images, valid_test_roots)
+
