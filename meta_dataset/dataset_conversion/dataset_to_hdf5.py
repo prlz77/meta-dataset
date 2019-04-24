@@ -684,7 +684,7 @@ class OmniglotConverter(DatasetConverter):
     for alphabet_folder_name in alphabets:
       alphabet_path = os.path.join(alphabets_path, alphabet_folder_name)
       # Each character is a class.
-      for char_folder_name in sorted(os.path.isdir(alphabet_path)):
+      for char_folder_name in sorted(os.listdir(alphabet_path)):
         class_path = os.path.join(alphabet_path, char_folder_name)
         class_label = len(self.class_names)
         class_records_path = os.path.join(
@@ -693,7 +693,7 @@ class OmniglotConverter(DatasetConverter):
         self.class_names[class_label] = '{}-{}'.format(alphabet_folder_name,
                                                        char_folder_name)
         self.images_per_class[class_label] = len(
-            os.path.isdir(class_path))
+            os.listdir(class_path))
 
         # Create and write the tf.Record of the examples of this class.
         write_tfrecord_from_directory(

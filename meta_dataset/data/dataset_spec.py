@@ -23,12 +23,13 @@ import collections
 from meta_dataset import data
 from meta_dataset.data import imagenet_specification
 from meta_dataset.data import learning_spec
-import tensorflow as tf
+from meta_dataset.utils.argparse import argparse
 
 # Global records root directory, for all datasets (except diagnostics).
-tf.flags.DEFINE_string('records_root_dir', '',
-                       'Root directory containing a subdirectory per dataset.')
-FLAGS = tf.flags.FLAGS
+parser = argparse.parser
+parser.add_argument('--records_root_dir', default='',
+                    help='Root directory containing a subdirectory per dataset.')
+FLAGS = argparse.FLAGS
 
 
 def get_classes(split, classes_per_split):
