@@ -9,13 +9,14 @@ from copy import deepcopy
 from torchvision import transforms
 import time
 import logging
+import cv2
 
 logging.getLogger().setLevel(logging.INFO)
 
 from meta_dataset.data import sampling
 from meta_dataset.data.dataset_spec import DatasetSpecification
 from meta_dataset.data.learning_spec import Split
-from meta_dataset.datasets.datasets import HDF5ClassDataset
+from meta_dataset.datasets.datasets import EpisodicHDF5ClassDataset
 from meta_dataset.datasets.datasets_test import make_dummy_dataset
 
 # DatasetSpecification to use in tests
@@ -65,20 +66,21 @@ def unpack_episode(episode):
 class EpisodicDataLoaderTest(unittest.TestCase):
     def setUp(self):
         os.makedirs("tmp", exist_ok=True)
-        make_dummy_dataset()
+        make_dummy_dataset(DATASET_SPEC)
         self.split = Split.TRAIN
         self.dataset_spec = DATASET_SPEC
         self.num_episodes = 10
 
     def test_without_threading(self):
 
-        transform = transforms.Compose([transforms.ToPILImage(),
+        transform = transforms.Compose([transforms.Lambda(lambda x: cv2.imdecode(x, -1)),
+                                        transforms.ToPILImage(),
                                         transforms.Resize(84),
                                         transforms.ToTensor()])
         sampling.RNG.seed(1234)
         sampler = sampling.EpisodeDescriptionSampler(self.dataset_spec,
                                                      self.split)
-        dataset1 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset1 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -96,7 +98,7 @@ class EpisodicDataLoaderTest(unittest.TestCase):
         self.assertEqual(counter, self.num_episodes)
 
         sampling.RNG.seed(1234)
-        dataset2 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset2 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -117,13 +119,14 @@ class EpisodicDataLoaderTest(unittest.TestCase):
 
     def test_with_threading(self):
 
-        transform = transforms.Compose([transforms.ToPILImage(),
+        transform = transforms.Compose([transforms.Lambda(lambda x: cv2.imdecode(x, -1)),
+                                        transforms.ToPILImage(),
                                         transforms.Resize(84),
                                         transforms.ToTensor()])
         sampling.RNG.seed(1234)
         sampler = sampling.EpisodeDescriptionSampler(self.dataset_spec,
                                                      self.split)
-        dataset1 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset1 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -141,7 +144,7 @@ class EpisodicDataLoaderTest(unittest.TestCase):
         self.assertEqual(counter, self.num_episodes)
 
         sampling.RNG.seed(1234)
-        dataset2 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset2 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -164,15 +167,16 @@ class EpisodicDataLoaderTest(unittest.TestCase):
 
         sampler = sampling.EpisodeDescriptionSampler(self.dataset_spec,
                                                      self.split)
-        transform = transforms.Compose([transforms.ToPILImage(),
+        transform = transforms.Compose([transforms.Lambda(lambda x: cv2.imdecode(x, -1)),
+                                        transforms.ToPILImage(),
                                         transforms.Resize(84),
                                         transforms.ToTensor()])
-        dataset1 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset1 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
                                     shuffle_seed=1234)
-        dataset2 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset2 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -199,10 +203,11 @@ class EpisodicDataLoaderTest(unittest.TestCase):
     def test_epoch_prefetch(self):
         sampler = sampling.EpisodeDescriptionSampler(self.dataset_spec,
                                                      self.split)
-        transform = transforms.Compose([transforms.ToPILImage(),
+        transform = transforms.Compose([transforms.Lambda(lambda x: cv2.imdecode(x, -1)),
+                                        transforms.ToPILImage(),
                                         transforms.Resize(84),
                                         transforms.ToTensor()])
-        dataset1 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset1 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -210,31 +215,35 @@ class EpisodicDataLoaderTest(unittest.TestCase):
                                     shuffle_seed=1234)
         dataset1.setup()
         dataset1.build_episode_indices()
-        dataloader1 = torch.utils.data.DataLoader(dataset1, 1, num_workers=0, shuffle=True)
+        dataloader1 = torch.utils.data.DataLoader(dataset1, 1,
+                                                  num_workers=0,
+                                                  shuffle=True,
+                                                  collate_fn=lambda x: x)
 
-        indices = deepcopy(dataset1.episode_indices)
+        indices = deepcopy(dataset1.episodes[0][3]["class_idx"].numpy())
         for i in range(self.num_episodes):
-            np.testing.assert_array_equal(indices[i][2][0][1], dataset1.episode_indices[i][2][0][1])
+            np.testing.assert_array_equal(indices, dataset1.episodes[0][3]["class_idx"].numpy())
         for _ in dataloader1:
             break
         for i in range(self.num_episodes):
             np.testing.assert_raises(AssertionError,
                                      np.testing.assert_array_equal,
-                                     indices[i][2][0][1],
-                                     dataset1.episode_indices[i][2][0][1])
+                                     indices,
+                                     dataset1.episodes[0][3]["class_idx"].numpy())
 
     def test_shuffled_with_threading(self):
         sampler = sampling.EpisodeDescriptionSampler(self.dataset_spec,
                                                      self.split)
-        transform = transforms.Compose([transforms.ToPILImage(),
+        transform = transforms.Compose([transforms.Lambda(lambda x: cv2.imdecode(x, -1)),
+                                        transforms.ToPILImage(),
                                         transforms.Resize(84),
                                         transforms.ToTensor()])
-        dataset1 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset1 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
                                     shuffle_seed=1234)
-        dataset2 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset2 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes,
                                     image_size=84,
                                     transforms=transform,
@@ -262,10 +271,11 @@ class EpisodicDataLoaderTest(unittest.TestCase):
     def test_threading_faster(self):
         sampler = sampling.EpisodeDescriptionSampler(self.dataset_spec,
                                                      self.split)
-        transform = transforms.Compose([transforms.ToPILImage(),
+        transform = transforms.Compose([transforms.Lambda(lambda x: cv2.imdecode(x, -1)),
+                                        transforms.ToPILImage(),
                                         transforms.Resize(84),
                                         transforms.ToTensor()])
-        dataset1 = HDF5ClassDataset(self.dataset_spec, self.split,
+        dataset1 = EpisodicHDF5ClassDataset(self.dataset_spec, self.split,
                                     sampler=sampler, epoch_size=self.num_episodes * 10,
                                     image_size=84,
                                     transforms=transform,

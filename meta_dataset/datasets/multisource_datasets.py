@@ -1,84 +1,11 @@
 import torch
 from torch.utils.data import Dataset
-
-import meta_dataset.data as data
-import meta_dataset.data.sampling as sampling
-from meta_dataset.datasets.datasets import HDF5ClassDataset
+import gin
 
 
-def make_multisource_episode_dataset(dataset_spec_list,
-                                     use_dag_ontology_list,
-                                     use_bilevel_ontology_list,
-                                     split,
-                                     epoch_size,
-                                     image_size,
-                                     pool=None,
-                                     num_ways=None,
-                                     num_support=None,
-                                     num_query=None,
-                                     reshuffle=True,
-                                     transforms=None):
-    """Adapted from the original metadataset tensorflow code Returns a pipeline
-    emitting data from multiple sources as Episodes.
-
-    Each episode only contains data from one single source. For each episode,
-    its source is sampled uniformly across all sources.
-
-    Args:
-        dataset_spec_list: A list of DatasetSpecification, one for each source.
-        use_dag_ontology_list: A list of Booleans, one for each source: whether
-            to use that source's DAG-structured ontology to sample episode
-            classes.
-        use_bilevel_ontology_list: A list of Booleans, one for each source:
-            whether to use that source's bi-level ontology to sample episode
-            classes.
-        split: A learning_spec.Split object identifying the sources split. It is
-            the same for all datasets.
-        epoch_size: The amount of loop iterations.
-        image_size: The output image size
-        pool: String (optional), for example-split datasets, which example split
-            to use ('train', 'valid', or 'test'), used at meta-test time only.
-        num_ways: Integer (optional), fixes the number of classes ("ways") to be
-            used in each episode if provided.
-        num_support: Integer (optional), fixes the number of examples for each
-            class in the support set if provided.
-        num_query: Integer (optional), fixes the number of examples for each
-            class in the query set if provided.
-        reshuffle: bool, whether to shuffle the images inside each class.
-        transforms: List of functions, pre-processing functions to apply to the
-            images inside each class.
-
-    Returns:
-        A Dataset instance that outputs fully-assembled and decoded episodes.
-    """
-    if pool is not None:
-        if not data.POOL_SUPPORTED:
-            raise NotImplementedError('Example-level splits or pools not supported.')
-    sources = []
-    for (dataset_spec, use_dag_ontology, use_bilevel_ontology) in zip(
-            dataset_spec_list, use_dag_ontology_list, use_bilevel_ontology_list):
-        sampler = sampling.EpisodeDescriptionSampler(
-            dataset_spec,
-            split,
-            pool=pool,
-            use_dag_hierarchy=use_dag_ontology,
-            use_bilevel_hierarchy=use_bilevel_ontology,
-            num_ways=num_ways,
-            num_support=num_support,
-            num_query=num_query)
-
-        if ".h5" in dataset_spec.file_pattern:
-            dataset = HDF5ClassDataset(dataset_spec, split, sampler, image_size,
-                                       epoch_size, pool,
-                                       reshuffle=reshuffle,
-                                       transforms=transforms)
-        sources.append(dataset)
-
-    return MultisourceEpisodeDataset(sources, epoch_size=epoch_size)
-
-
+@gin.configurable('BatchSplitReaderGetReader', whitelist=['add_dataset_offset'])
 class MultisourceEpisodeDataset(Dataset):
-    def __init__(self, datasets, epoch_size):
+    def __init__(self, datasets, epoch_size, add_dataset_offset=False):
         """ Creates a dataset from multiple Dataset instances
 
         Each episode is sampled from a randomly chosen dataset.
@@ -93,8 +20,11 @@ class MultisourceEpisodeDataset(Dataset):
         self.datasets = datasets
         self.epoch_size = epoch_size
 
+        offset = 0
         for dataset in datasets:
             dataset.epoch_size = self.epoch_size
+            dataset.offset = offset
+            offset += dataset.num_classes
 
     def build_episode_indices(self):
         """ Generates the indices for all the episodes in an epoch.

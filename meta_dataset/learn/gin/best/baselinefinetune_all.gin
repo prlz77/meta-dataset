@@ -1,6 +1,6 @@
-include 'meta_dataset/learn/gin/setups/all.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/setups/all.gin'
 
-include 'meta_dataset/learn/gin/models/baselinefinetune_config.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/models/baselinefinetune_config.gin'
 LearnerConfig.embedding_network = 'resnet'
 weight_decay = 0.000003
 BaselineFinetuneLearner.num_finetune_steps = 75

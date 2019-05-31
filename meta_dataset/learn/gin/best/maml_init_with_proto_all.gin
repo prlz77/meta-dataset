@@ -1,6 +1,6 @@
-include 'meta_dataset/learn/gin/setups/all.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/setups/all.gin'
 
-include 'meta_dataset/learn/gin/models/maml_init_with_proto_config.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/models/maml_init_with_proto_config.gin'
 LearnerConfig.embedding_network = 'resnet_maml'
 weight_decay = 0.001
 MAMLLearner.first_order = True

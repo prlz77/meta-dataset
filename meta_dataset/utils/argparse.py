@@ -2,12 +2,12 @@ import argparse
 parser = argparse.ArgumentParser()
 argparse.parser = parser
 
-class BUNCH(object):
+class FLAGS(object):
     def update(self, kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-argparse.FLAGS = BUNCH()
+argparse.FLAGS = FLAGS()
 
 parse_args = parser.parse_args
 def _parse_args(*args, **kwargs):

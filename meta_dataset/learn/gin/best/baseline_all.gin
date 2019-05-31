@@ -1,6 +1,6 @@
-include 'meta_dataset/learn/gin/setups/all.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/setups/all.gin'
 
-include 'meta_dataset/learn/gin/models/baseline_config.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/models/baseline_config.gin'
 LearnerConfig.embedding_network = 'resnet'
 BaselineLearner.knn_in_fc = False
 BaselineLearner.knn_distance = 'cosine'

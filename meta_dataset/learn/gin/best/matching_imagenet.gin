@@ -1,6 +1,6 @@
-include 'meta_dataset/learn/gin/setups/imagenet.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/setups/imagenet.gin'
 
-include 'meta_dataset/learn/gin/models/matching_config.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/models/matching_config.gin'
 LearnerConfig.embedding_network = 'resnet'
 DataConfig.image_height = 126
 

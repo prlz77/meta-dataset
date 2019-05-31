@@ -157,10 +157,13 @@ class BenchmarkSpecification(
         raise ValueError(
             'Dataset {} has no bilevel ontology, but is '
             'represented using a BiLevelDatasetSpecification.'.format(i))
-    super(BenchmarkSpecification,
-          self).__init__(name, image_shape, dataset_spec_list, has_dag_ontology,
-                         has_bilevel_ontology)
+   # super(BenchmarkSpecification,
+   #       self).__init__(name, image_shape, dataset_spec_list, has_dag_ontology,
+   #                      has_bilevel_ontology)
 
+  def __new__(cls, *args, **kwargs):
+    self = super(BenchmarkSpecification, cls).__new__(cls, *args, **kwargs)
+    return self
 
 class DatasetSpecification(
     collections.namedtuple('DatasetSpecification',

@@ -1,4 +1,4 @@
-include 'meta_dataset/learn/gin/models/learner_config.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/models/learner_config.gin'
 LearnerConfig.episodic = True
 LearnerConfig.train_learner = 'MAML'
 LearnerConfig.eval_learner = 'MAML'

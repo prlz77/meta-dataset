@@ -1,4 +1,4 @@
-include 'meta_dataset/learn/gin/setups/pipeline_config.gin'
+include 'meta_dataset_pytorch/meta_dataset/learn/gin/setups/pipeline_config.gin'
 
 # Other default values for the data pipeline.
 DataConfig.image_height = 84

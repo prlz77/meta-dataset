@@ -20,11 +20,13 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
-import gin.tf
-import tensorflow as tf
+import gin
+#import tensorflow as tf
 
 MAX_WAY = 50  # The maximum number of classes we will see in any batch.
 
+class tf(object):
+    AUTO_REUSE=False
 
 def conv2d(x, w, stride=1, b=None):
   """conv2d returns a 2d convolution layer with full stride."""

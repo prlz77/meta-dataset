@@ -6,7 +6,7 @@ import shutil as sh
 import unittest
 import gin
 
-from meta_dataset.datasets.datasets import HDF5ClassDataset
+from meta_dataset.datasets.datasets import EpisodicHDF5ClassDataset
 from meta_dataset.data.dataset_spec import DatasetSpecification
 from meta_dataset.data.learning_spec import Split
 from meta_dataset.data import sampling
@@ -266,7 +266,7 @@ class HDF5DatasetTest(unittest.TestCase):
         dataset_spec = sampler.dataset_spec
         split = sampler.split
 
-        dataset = HDF5ClassDataset(dataset_spec, split, sampler=sampler, epoch_size=num_episodes, reshuffle=shuffle,
+        dataset = EpisodicHDF5ClassDataset(dataset_spec, split, sampler=sampler, epoch_size=num_episodes, reshuffle=shuffle,
                                    image_size=self.image_size,
                                    transforms=transforms.ToTensor(),
                                    shuffle_seed=shuffle_seed)

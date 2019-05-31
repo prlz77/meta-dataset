@@ -33,7 +33,7 @@ import os
 
 from meta_dataset import data
 import numpy as np
-import tensorflow as tf
+#import tensorflow as tf
 
 # DUMMY_CLASS_ID will be used as the target of examples used for padding only.
 DUMMY_CLASS_ID = -1

@@ -30,12 +30,12 @@ from __future__ import print_function
 
 import functools
 
-import gin.tf
+import gin
 from meta_dataset import data
 from meta_dataset.data import learning_spec
 from meta_dataset.data import reader
 from meta_dataset.data import sampling
-import tensorflow as tf
+#import tensorflow as tf
 
 
 def filter_dummy_examples(example_strings, class_ids):

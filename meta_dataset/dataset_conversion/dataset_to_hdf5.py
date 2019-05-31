@@ -18,7 +18,7 @@
 Specifically, the DatasetConverter class is used to perform the conversion of a
 dataset to the format necessary for its addition in the benchmark. This involves
 creating a DatasetSpecification for the dataset in question, and creating (and
-storing) a tf.record for every one of its classes.
+storing) a hdf5 for every one of its classes.
 
 Some subclasses make use of a "split file", which is a `.pkl` file file that
 stores a dictionary whose keys are 'train', 'valid', and 'test' and whose values
@@ -32,12 +32,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import binascii
 import collections
 import pickle as pkl
 import io
 import json
-import operator
 import os
 import random
 from meta_dataset.data import dataset_spec as ds_spec
@@ -50,81 +48,87 @@ from scipy.io import loadmat
 import h5py
 import logging
 from meta_dataset.utils.argparse import argparse
-
+import cv2
+from tqdm import tqdm
+from joblib import delayed, Parallel
 
 parser = argparse.parser
 # Datasets in the same order as reported in the article.
 # 'ilsvrc_2012_data_root' is already defined in imagenet_specification.py.
 parser.add_argument(
-    '--ilsvrc_2012_num_leaf_images_path', default='',
-    help='A path used as a cache for a dict mapping the WordNet id of each Synset '
-    'of a ILSVRC 2012 class to its number of images. If empty, it defaults to '
-    '"ilsvrc_2012/num_leaf_images.pkl" inside records_root.')
+  '--ilsvrc_2012_num_leaf_images_path', default='',
+  help='A path used as a cache for a dict mapping the WordNet id of each Synset '
+       'of a ILSVRC 2012 class to its number of images. If empty, it defaults to '
+       '"ilsvrc_2012/num_leaf_images.pkl" inside records_root.')
 
 parser.add_argument(
-    '--omniglot_data_root',
-    default='',
-    help='Path to the root of the omniglot data.')
+  '--save_ready_to_load', type=int, default=0,
+  help="Saves images already resized, cropped and decoded. The argument is the image size"
+)
+parser.add_argument(
+  '--omniglot_data_root',
+  default='',
+  help='Path to the root of the omniglot data.')
 
 parser.add_argument(
-    '--aircraft_data_root',
-    default='',
-    help='Path to the root of the FGVC-Aircraft Benchmark.')
+  '--aircraft_data_root',
+  default='',
+  help='Path to the root of the FGVC-Aircraft Benchmark.')
 
 parser.add_argument(
-    '--cu_birds_data_root',
-    default='',
-    help='Path to the root of the CU-Birds dataset.')
+  '--cu_birds_data_root',
+  default='',
+  help='Path to the root of the CU-Birds dataset.')
 
 parser.add_argument(
-    '--dtd_data_root',
-    default='',
-    help='Path to the root of the Describable Textures Dataset.')
+  '--dtd_data_root',
+  default='',
+  help='Path to the root of the Describable Textures Dataset.')
 
 parser.add_argument(
-    '--quickdraw_data_root',
-    default='',
-    help='Path to the root of the quickdraw data.')
+  '--quickdraw_data_root',
+  default='',
+  help='Path to the root of the quickdraw data.')
 
 parser.add_argument(
-    '--fungi_data_root',
-    default='',
-    help='Path to the root of the fungi data.')
+  '--fungi_data_root',
+  default='',
+  help='Path to the root of the fungi data.')
 
 parser.add_argument(
-    '--vgg_flower_data_root',
-    default='',
-    help='Path to the root of the VGG Flower data.')
+  '--vgg_flower_data_root',
+  default='',
+  help='Path to the root of the VGG Flower data.')
 
 parser.add_argument(
-    '--traffic_sign_data_root',
-    default='',
-    help='Path to the root of the Traffic Sign dataset.')
+  '--traffic_sign_data_root',
+  default='',
+  help='Path to the root of the Traffic Sign dataset.')
 
 parser.add_argument(
-    '--mscoco_data_root',
-    default='',
-    help='Path to the root of the MSCOCO images and annotations. The root directory '
-    'should have a subdirectory `train2017` and an annotation JSON file '
-    '`instances_train2017.json`. Both can be downloaded from MSCOCO website: '
-    'http://cocodataset.org/#download and unzipped into the root directory.')
+  '--mscoco_data_root',
+  default='',
+  help='Path to the root of the MSCOCO images and annotations. The root directory '
+       'should have a subdirectory `train2017` and an annotation JSON file '
+       '`instances_train2017.json`. Both can be downloaded from MSCOCO website: '
+       'http://cocodataset.org/#download and unzipped into the root directory.')
 
 # Diagnostics-only dataset.
 parser.add_argument(
-    '--mini_imagenet_data_root',
-    default='',
-    help='Path to the root of the MiniImageNet data.')
+  '--mini_imagenet_data_root',
+  default='',
+  help='Path to the root of the MiniImageNet data.')
 
 # Output flags.
 parser.add_argument(
-    '--records_root',
-    default='',
-    help='The root directory storing all tf.Records of datasets.')
+  '--records_root',
+  default='',
+  help='The root directory storing all records of datasets.')
 
 parser.add_argument(
-    '--splits_root',
-    default='',
-    help='The root directory storing the splits of datasets.')
+  '--splits_root',
+  default='',
+  help='The root directory storing the splits of datasets.')
 
 FLAGS = argparse.FLAGS
 DEFAULT_FILE_PATTERN = '{}.h5'
@@ -157,31 +161,31 @@ def gen_rand_split_inds(num_train_classes, num_valid_classes, num_test_classes):
 
   # First split into trainval and test splits.
   trainval_inds = np.random.choice(
-      num_classes, num_trainval_classes, replace=False)
+    num_classes, num_trainval_classes, replace=False)
   test_inds = np.setdiff1d(np.arange(num_classes), trainval_inds)
   # Now further split trainval into train and val.
   train_inds = np.random.choice(trainval_inds, num_train_classes, replace=False)
   valid_inds = np.setdiff1d(trainval_inds, train_inds)
 
   logging.info(
-      'Created splits with %d train, %d validation and %d test classes.',
-      len(train_inds), len(valid_inds), len(test_inds))
+    'Created splits with %d train, %d validation and %d test classes.',
+    len(train_inds), len(valid_inds), len(test_inds))
   return train_inds, valid_inds, test_inds
 
 
-def write_tfrecord_from_npy_single_channel(class_npy_file, class_label,
-                                           output_path):
-  """Create and write a tf.record file for the data of a class.
+def write_hdf5_from_npy_single_channel(class_npy_file, class_label,
+                                       output_path):
+  """Create and write a hdf5 file for the data of a class.
 
   This assumes that the provided .npy file stores the data of a given class in
   an array of shape [num_images_of_given_class, side**2].
   In the case of the Quickdraw dataset for example, side = 28.
   Each row of that array is interpreted as a single-channel side x side image,
-  read into a PIL.Image, converted to RGB and then written into a record.
+  read into a PIL.Image, converted to RGB and then written into a hdf5.
   Args:
     class_npy_file: the .npy file of the images of class class_label.
-    class_label: the label of the class that a Record is being made for.
-    output_path: the location to write the Record.
+    class_label: the label of the class that a hdf5 is being made for.
+    output_path: the location to write the hdf5.
 
   Returns:
     The number of images in the .npy file for class class_label.
@@ -194,14 +198,12 @@ def write_tfrecord_from_npy_single_channel(class_npy_file, class_label,
       img: a 1D numpy array of shape [side**2]
 
     Returns:
-      a PIL Image
+      a jpeg encoded image
     """
     # We make the assumption that the images are square.
     side = int(np.sqrt(img.shape[0]))
-    # To load an array as a PIL.Image we must first reshape it to 2D.
-    img = Image.fromarray(img.reshape((side, side)))
-    img = img.convert('RGB')
-    return img
+    img.reshape((side, side))
+    return cv2.imencode(".jpg", img)
 
   with open(class_npy_file, 'rb') as f:
     imgs = np.load(f)
@@ -211,50 +213,47 @@ def write_tfrecord_from_npy_single_channel(class_npy_file, class_label,
     imgs = imgs.astype(np.uint8)
     imgs *= 255
 
-  writer = h5py.File(output_path, 'w')
+  writer = h5py.File(output_path, 'r+')
   dt = h5py.special_dtype(vlen=np.uint8)
-  writer.create_dataset("images", dtype=dt, shape=(len(imgs), ))
-  writer.create_dataset("labels", dtype=np.uint32, shape=(len(imgs), ))
+  writer.create_dataset(str(class_label), dtype=dt, shape=(len(imgs),))
+  writer.create_dataset("labels", dtype=np.uint32, shape=(len(imgs),))
   # Takes a row each time, i.e. a different image (of the same class_label).
   for i, image in enumerate(imgs):
-    img = load_image(image)
     # Compress to JPEG before writing
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG')
-    buf.seek(0)
-    writer["images"][i] = bytearray(img.getvalue())
+    img = load_image(image)
+    writer["images"][i] = img
     writer["labels"][i] = class_label
 
   writer.close()
   return len(imgs)
 
 
-def write_tfrecord_from_image_files(class_files,
-                                    class_label,
-                                    output_path,
-                                    invert_img=False,
-                                    bboxes=None,
-                                    output_format='JPEG',
-                                    skip_on_error=False):
-  """Create and write a tf.record file for the images corresponding to a class.
+def write_hdf5_from_image_files(class_files,
+                                class_label,
+                                output_path,
+                                invert_img=False,
+                                bboxes=None,
+                                output_format='.jpg',
+                                skip_on_error=False):
+  """Create and write a hdf5 file for the images corresponding to a class.
 
   Args:
     class_files: the list of paths to images of class class_label.
-    class_label: the label of the class that a record is being made for.
-    output_path: the location to write the record.
+    class_label: the label of the class that a hdf5 is being made for.
+    output_path: the location to write the hdf5.
     invert_img: change black pixels to white ones and vice versa. Used for
       Omniglot for example to change the black-background-white-digit images
       into more conventional-looking white-background-black-digit ones.
     bboxes: list of bounding boxes, one for each filename passed as input. If
       provided, images are cropped to those bounding box values.
     output_format: a string representing a PIL.Image encoding type: how the
-      image data is encoded inside the tf.record. This needs to be consistent
-      with the record_decoder of the DataProvider that will read the file.
+      image data is encoded inside the hdf5. This needs to be consistent
+      with the hdf5_decoder of the DataProvider that will read the file.
     skip_on_error: whether to skip an image if there is an issue in reading it.
       The default it to crash and report the original exception.
 
   Returns:
-    The number of images written into the records file.
+    The number of images written into the hdf5 file.
   """
 
   def load_and_process_image(path, bbox=None):
@@ -273,73 +272,56 @@ def write_tfrecord_from_image_files(class_files,
     Returns:
       A bytes representation of the encoded image.
     """
-    with open(path, 'rb') as f:
-      image_bytes = f.read()
     try:
-      img = Image.open(io.BytesIO(image_bytes))
+      im = cv2.imread(path, cv2.IMREAD_COLOR)
+      if bbox is not None:
+        left, upper, right, lower = bbox
+        im = im[upper:lower, left:right, :]
+      if invert_img:
+        im = 255 - im
+      if FLAGS.save_ready_to_load > 0:
+        size = FLAGS.save_ready_to_load
+        im = cv2.resize(im, (size, size), interpolation=cv2.INTER_CUBIC)
+      if output_format is not None:
+        im = cv2.imencode(output_format, im)[1]
+      return im
     except:
-      logging.warn('Failed to open image: {}'.format(path))
+      logging.warning('Failed to open image: {}'.format(path))
       raise
 
-    img_needs_encoding = False
-
-    if img.format != output_format:
-      img_needs_encoding = True
-    if img.mode != 'RGB':
-      img = img.convert('RGB')
-      img_needs_encoding = True
-    if bbox is not None:
-      img = img.crop(bbox)
-      img_needs_encoding = True
-    if invert_img:
-      img = ImageOps.invert(img)
-      img_needs_encoding = True
-
-    if img_needs_encoding:
-      # Convert the image into output_format
-      buf = io.BytesIO()
-      img.save(buf, format=output_format)
-      buf.seek(0)
-      image_bytes = buf.getvalue()
-    return image_bytes
-
-  writer = h5py.File(output_path, 'w')
+  writer = h5py.File(output_path, 'a')
   dt = h5py.special_dtype(vlen=np.uint8)
-  writer.create_dataset("images", dtype=dt, shape=(0, ), maxshape=(None, ))
-  writer.create_dataset("labels", dtype=np.uint32, shape=(0, ), maxshape=(None, ))
+  writer.create_dataset(str(class_label), dtype=dt, shape=(len(class_files),))
+  if "labels" not in writer.keys():
+    writer.create_dataset("labels", dtype=np.uint8, shape=(len(class_files),))
   written_images_count = 0
-  for i, path in enumerate(class_files):
-    bbox = bboxes[i] if bboxes is not None else None
-    try:
-      img = load_and_process_image(path, bbox)
-    except (IOError) as e:
-      if skip_on_error:
-        logging.warn('While trying to load file %s, got error: %s', path, e)
-      else:
-        raise
-    else:
-      # This gets executed only if no Exception was raised
-      writer["images"].resize(written_images_count + 1, 0)
-      writer["labels"].resize(written_images_count + 1, 0)
-      writer["images"][written_images_count] = bytearray(img)
-      written_images_count += 1
+  bboxes = [None] * len(class_files) if bboxes is None else bboxes
+  with Parallel(n_jobs=16) as parallel:
+    with tqdm(total=len(class_files)) as pbar:
+      imgs = parallel(delayed(load_and_process_image)(path, bbox) for path, bbox in zip(class_files, bboxes))
+      written_images_count += len(imgs)
+      for i, img in enumerate(imgs):
+        writer[str(class_label)][i] = img.ravel()
+        writer["labels"][i] = class_label
 
+      pbar.update(written_images_count)
+  assert (written_images_count == len(class_files))
   writer.close()
   return written_images_count
 
 
-def write_tfrecord_from_directory(class_directory,
-                                  class_label,
-                                  output_path,
-                                  invert_img=False,
-                                  files_to_skip=None,
-                                  skip_on_error=False):
-  """Create and write a tf.record file for the images corresponding to a class.
+def write_hdf5_from_directory(class_directory,
+                              class_label,
+                              output_path,
+                              invert_img=False,
+                              files_to_skip=None,
+                              skip_on_error=False):
+  """Create and write an hdf5 file with a dataset for the images corresponding to a class.
 
   Args:
     class_directory: the home of the images of class class_label.
-    class_label: the label of the class that a record is being made for.
-    output_path: the location to write the record.
+    class_label: the label of the class that a hdf5 is being made for.
+    output_path: the location to write the hdf5.
     invert_img: change black pixels to white ones and vice versa. Used for
       Omniglot for example to change the black-background-white-digit images
       into more conventional-looking white-background-black-digit ones.
@@ -349,7 +331,7 @@ def write_tfrecord_from_directory(class_directory,
       The default it to crash and report the original exception.
 
   Returns:
-    The number of images written into the records file.
+    The number of images written into the hdf5 file.
   """
   if files_to_skip is None:
     files_to_skip = set()
@@ -364,12 +346,12 @@ def write_tfrecord_from_directory(class_directory,
       continue
     class_files.append(filepath)
 
-  written_images_count = write_tfrecord_from_image_files(
-      class_files,
-      class_label,
-      output_path,
-      invert_img,
-      skip_on_error=skip_on_error)
+  written_images_count = write_hdf5_from_image_files(
+    class_files,
+    class_label,
+    output_path,
+    invert_img,
+    skip_on_error=skip_on_error)
 
   if not skip_on_error:
     assert len(class_files) == written_images_count
@@ -380,14 +362,14 @@ class DatasetConverter(object):
   """Converts a dataset to the format required to integrate it in the benchmark.
 
   In particular, this involves:
-  1) Creating a tf.record file for each class of the dataset.
+  1) Creating a hdf5 file for each class of the dataset.
   2) Creating an instance of DatasetSpecification or BiLevelDatasetSpecification
     (as appropriate) for the dataset. This includes information about the
     splits, classes, super-classes if applicable, etc that is required for
     creating episodes from the dataset.
 
   1) and 2) are accomplished by calling the convert_dataset() method.
-  This will create and write the dataset specification and records in
+  This will create and write the dataset specification and hdf5 in
   self.records_path.
   """
 
@@ -448,9 +430,9 @@ class DatasetConverter(object):
     """Sets self.dataset_spec to an initial DatasetSpecification."""
     # Maps each Split to the number of classes assigned to it.
     self.classes_per_split = {
-        learning_spec.Split.TRAIN: 0,
-        learning_spec.Split.VALID: 0,
-        learning_spec.Split.TEST: 0
+      learning_spec.Split.TRAIN: 0,
+      learning_spec.Split.VALID: 0,
+      learning_spec.Split.TEST: 0
     }
 
     self._create_data_spec()
@@ -459,9 +441,9 @@ class DatasetConverter(object):
     """Sets self.dataset_spec to an initial BiLevelDatasetSpecification."""
     # Maps each Split to the number of superclasses assigned to it.
     self.superclasses_per_split = {
-        learning_spec.Split.TRAIN: 0,
-        learning_spec.Split.VALID: 0,
-        learning_spec.Split.TEST: 0
+      learning_spec.Split.TRAIN: 0,
+      learning_spec.Split.VALID: 0,
+      learning_spec.Split.TEST: 0
     }
 
     # Maps each superclass id to the number of classes it contains.
@@ -510,13 +492,13 @@ class DatasetConverter(object):
     """
     if self.has_superclasses:
       self.dataset_spec = ds_spec.BiLevelDatasetSpecification(
-          self.name, self.superclasses_per_split, self.classes_per_superclass,
-          self.images_per_class, self.superclass_names, self.class_names,
-          self.records_path, self.file_pattern)
+        self.name, self.superclasses_per_split, self.classes_per_superclass,
+        self.images_per_class, self.superclass_names, self.class_names,
+        self.records_path, self.file_pattern)
     else:
       self.dataset_spec = ds_spec.DatasetSpecification(
-          self.name, self.classes_per_split, self.images_per_class,
-          self.class_names, self.records_path, self.file_pattern)
+        self.name, self.classes_per_split, self.images_per_class,
+        self.class_names, self.records_path, self.file_pattern)
 
   def convert_dataset(self):
     """Converts dataset as required to integrate it in the benchmark.
@@ -547,10 +529,10 @@ class DatasetConverter(object):
     ones for testing classes.
     The reader data sources operate under this assumption.
 
-    Secondly, a tf.record needs to be created and written for each class. There
+    Secondly, a hdf5 needs to be created and written for each class. There
     are some general functions at the top of this file that may be useful for
-    this (e.g. write_tfrecord_from_npy_single_channel,
-    write_tfrecord_from_image_files).
+    this (e.g. write_hdf5_from_npy_single_channel,
+    write_hdf5_from_image_files).
     """
     raise NotImplementedError('Must be implemented in each sub-class.')
 
@@ -619,7 +601,7 @@ class DatasetConverter(object):
 
     # Finally, write the splits in the designated location.
     logging.info('Saving new splits for dataset %s at %s...', self.name,
-                    self.split_file)
+                 self.split_file)
     with open(self.split_file, 'wb') as f:
       pkl.dump(splits, f, protocol=pkl.HIGHEST_PROTOCOL)
     logging.info('Done.')
@@ -688,16 +670,16 @@ class OmniglotConverter(DatasetConverter):
         class_path = os.path.join(alphabet_path, char_folder_name)
         class_label = len(self.class_names)
         class_records_path = os.path.join(
-            self.records_path,
-            self.dataset_spec.file_pattern.format(class_label))
+          self.records_path,
+          self.dataset_spec.file_pattern.format(class_label))
         self.class_names[class_label] = '{}-{}'.format(alphabet_folder_name,
                                                        char_folder_name)
         self.images_per_class[class_label] = len(
-            os.listdir(class_path))
+          os.listdir(class_path))
 
-        # Create and write the tf.Record of the examples of this class.
-        write_tfrecord_from_directory(
-            class_path, class_label, class_records_path, invert_img=True)
+        # Create and write the hdf5 of the examples of this class.
+        write_hdf5_from_directory(
+          class_path, class_label, class_records_path, invert_img=True)
 
         # Add this character to the count of subclasses of this superclass.
         superclass_label = len(self.superclass_names)
@@ -722,10 +704,10 @@ class OmniglotConverter(DatasetConverter):
     # We keep the 'evaluation' set of alphabets for testing exclusively
     # The chosen alphabets have 14, 14, 16, 17, and 20 characters, respectively.
     validation_alphabets = [
-        'Blackfoot_(Canadian_Aboriginal_Syllabics)',
-        'Ojibwe_(Canadian_Aboriginal_Syllabics)',
-        'Inuktitut_(Canadian_Aboriginal_Syllabics)', 'Tagalog',
-        'Alphabet_of_the_Magi'
+      'Blackfoot_(Canadian_Aboriginal_Syllabics)',
+      'Ojibwe_(Canadian_Aboriginal_Syllabics)',
+      'Inuktitut_(Canadian_Aboriginal_Syllabics)', 'Tagalog',
+      'Alphabet_of_the_Magi'
     ]
 
     training_alphabets = []
@@ -767,11 +749,11 @@ class QuickdrawConverter(DatasetConverter):
     num_test_classes = num_classes - num_trainval_classes
 
     train_inds, valid_inds, test_inds = gen_rand_split_inds(
-        num_train_classes, num_valid_classes, num_test_classes)
+      num_train_classes, num_valid_classes, num_test_classes)
     splits = {
-        'train': np.array(class_names)[train_inds],
-        'valid': np.array(class_names)[valid_inds],
-        'test': np.array(class_names)[test_inds]
+      'train': np.array(class_names)[train_inds],
+      'valid': np.array(class_names)[valid_inds],
+      'test': np.array(class_names)[test_inds]
     }
     return splits
 
@@ -790,7 +772,7 @@ class QuickdrawConverter(DatasetConverter):
       self.classes_per_split[split] += 1
       class_label = len(self.class_names)
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_label))
+        self.records_path, self.dataset_spec.file_pattern.format(class_label))
 
       # The names of the files in self.data_root for Quickdraw are of the form
       # class_name.npy, for example airplane.npy.
@@ -798,9 +780,9 @@ class QuickdrawConverter(DatasetConverter):
       self.class_names[class_label] = class_name
       class_path = os.path.join(self.data_root, class_npy_fname)
 
-      # Create and write the tf.Record of the examples of this class.
-      num_imgs = write_tfrecord_from_npy_single_channel(class_path, class_label,
-                                                        class_records_path)
+      # Create and write the hdf5 of the examples of this class.
+      num_imgs = write_hdf5_from_npy_single_channel(class_path, class_label,
+                                                    class_records_path)
       self.images_per_class[class_label] = num_imgs
 
   def create_dataset_specification_and_records(self):
@@ -860,11 +842,11 @@ class CUBirdsConverter(DatasetConverter):
     assert len(class_names) == self.NUM_TOTAL_CLASSES, err_msg
 
     train_inds, valid_inds, test_inds = gen_rand_split_inds(
-        self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
+      self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
     splits = {
-        'train': np.array(class_names)[train_inds],
-        'valid': np.array(class_names)[valid_inds],
-        'test': np.array(class_names)[test_inds]
+      'train': np.array(class_names)[train_inds],
+      'valid': np.array(class_names)[valid_inds],
+      'test': np.array(class_names)[test_inds]
     }
     return splits
 
@@ -884,15 +866,15 @@ class CUBirdsConverter(DatasetConverter):
     image_root_folder = os.path.join(self.data_root, 'images')
     all_classes = np.concatenate([train_classes, valid_classes, test_classes])
     for class_id, class_label in enumerate(all_classes):
-      logging.info('Creating record for class ID %d...', class_id)
+      logging.info('Creating hdf5 for class ID %d...', class_id)
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(class_id))
       self.class_names[class_id] = class_label
       class_directory = os.path.join(image_root_folder, class_label)
       self.images_per_class[class_id] = len(
-          os.listdir(class_directory))
-      write_tfrecord_from_directory(class_directory, class_id,
-                                    class_records_path)
+        os.listdir(class_directory))
+      write_hdf5_from_directory(class_directory, class_id,
+                                class_records_path)
     self.write_data_spec_pkl()
 
 
@@ -918,7 +900,7 @@ class VGGFlowerConverter(DatasetConverter):
       'train', 'valid', and 'test' to a list of class integers.
     """
     train_inds, valid_inds, test_inds = gen_rand_split_inds(
-        self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
+      self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
     splits = {'train': train_inds, 'valid': valid_inds, 'test': test_inds}
     return splits
 
@@ -941,7 +923,7 @@ class VGGFlowerConverter(DatasetConverter):
     filepaths = collections.defaultdict(list)
     for i, label in enumerate(labels):
       filepaths[label - 1].append(
-          os.path.join(self.data_root, 'jpg', 'image_{:05d}.jpg'.format(i + 1)))
+        os.path.join(self.data_root, 'jpg', 'image_{:05d}.jpg'.format(i + 1)))
 
     all_classes = np.concatenate([train_classes, valid_classes, test_classes])
     # Class IDs are constructed in such a way that
@@ -951,15 +933,15 @@ class VGGFlowerConverter(DatasetConverter):
     #   - test class IDs lie in
     #     [num_train_classes + num_validation_classes, num_classes).
     for class_id, class_label in enumerate(all_classes):
-      logging.info('Creating record for class ID %d...', class_id)
+      logging.info('Creating hdf5 for class ID %d...', class_id)
       class_paths = filepaths[class_label]
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(class_id))
       self.class_names[class_id] = class_label
       self.images_per_class[class_id] = len(class_paths)
 
-      # Create and write the tf.Record of the examples of this class.
-      write_tfrecord_from_image_files(class_paths, class_id, class_records_path)
+      # Create and write the hdf5 of the examples of this class.
+      write_hdf5_from_image_files(class_paths, class_id, class_records_path)
 
     self.write_data_spec_pkl()
 
@@ -986,7 +968,7 @@ class DTDConverter(DatasetConverter):
       'train', 'valid', and 'test' to a list of class integers.
     """
     train_inds, valid_inds, test_inds = gen_rand_split_inds(
-        self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
+      self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
     splits = {'train': train_inds, 'valid': valid_inds, 'test': test_inds}
     return splits
 
@@ -1005,24 +987,24 @@ class DTDConverter(DatasetConverter):
 
     all_classes = np.concatenate([train_classes, valid_classes, test_classes])
     class_names = sorted(
-        os.listdir(os.path.join(self.data_root, 'images')))
+      os.listdir(os.path.join(self.data_root, 'images')))
 
     for class_id, class_label in enumerate(all_classes):
-      logging.info('Creating record for class ID %d...', class_id)
+      logging.info('Creating hdf5 for class ID %d...', class_id)
       class_name = class_names[class_label]
       class_directory = os.path.join(self.data_root, 'images', class_name)
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(class_id))
       self.class_names[class_id] = class_name
       # 'waffled' class directory has a leftover '.directory' file.
       files_to_skip = set()
       if class_name == 'waffled':
         files_to_skip.add('.directory')
-      self.images_per_class[class_id] = write_tfrecord_from_directory(
-          class_directory,
-          class_id,
-          class_records_path,
-          files_to_skip=files_to_skip)
+      self.images_per_class[class_id] = write_hdf5_from_directory(
+        class_directory,
+        class_id,
+        class_records_path,
+        files_to_skip=files_to_skip)
 
     self.write_data_spec_pkl()
 
@@ -1049,7 +1031,7 @@ class AircraftConverter(DatasetConverter):
       'train', 'valid', and 'test' to a list of class integers.
     """
     train_inds, valid_inds, test_inds = gen_rand_split_inds(
-        self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
+      self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
     splits = {'train': train_inds, 'valid': valid_inds, 'test': test_inds}
     return splits
 
@@ -1079,25 +1061,25 @@ class AircraftConverter(DatasetConverter):
     bboxes_path = os.path.join(self.data_root, 'data', 'images_box.txt')
     with open(bboxes_path, 'r') as f:
       names_to_bboxes = [
-          line.split('\n')[0].split(' ') for line in f.readlines()
+        line.split('\n')[0].split(' ') for line in f.readlines()
       ]
       names_to_bboxes = dict(
-          (name, map(int, (xmin, ymin, xmax, ymax)))
-          for name, xmin, ymin, xmax, ymax in names_to_bboxes)
+        (name, map(int, (xmin, ymin, xmax, ymax)))
+        for name, xmin, ymin, xmax, ymax in names_to_bboxes)
 
     # Retrieve mapping from filename to variant
     variant_trainval_path = os.path.join(self.data_root, 'data',
                                          'images_variant_trainval.txt')
     with open(variant_trainval_path, 'r') as f:
       names_to_variants = [
-          line.split('\n')[0].split(' ', 1) for line in f.readlines()
+        line.split('\n')[0].split(' ', 1) for line in f.readlines()
       ]
 
     variant_test_path = os.path.join(self.data_root, 'data',
                                      'images_variant_test.txt')
     with open(variant_test_path, 'r') as f:
       names_to_variants += [
-          line.split('\n')[0].split(' ', 1) for line in f.readlines()
+        line.split('\n')[0].split(' ', 1) for line in f.readlines()
       ]
 
     names_to_variants = dict(names_to_variants)
@@ -1117,24 +1099,24 @@ class AircraftConverter(DatasetConverter):
     assert len(class_names) == len(all_classes)
 
     for class_id, class_label in enumerate(all_classes):
-      logging.info('Creating record for class ID %d...', class_id)
+      logging.info('Creating hdf5 for class ID %d...', class_id)
       class_name = class_names[class_label]
       class_files = [
-          os.path.join(self.data_root, 'data', 'images',
-                       '{}.jpg'.format(filename))
-          for filename in sorted(variants_to_names[class_name])
+        os.path.join(self.data_root, 'data', 'images',
+                     '{}.jpg'.format(filename))
+        for filename in sorted(variants_to_names[class_name])
       ]
       bboxes = [
-          names_to_bboxes[name]
-          for name in sorted(variants_to_names[class_name])
+        names_to_bboxes[name]
+        for name in sorted(variants_to_names[class_name])
       ]
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(class_id))
       self.class_names[class_id] = class_name
       self.images_per_class[class_id] = len(class_files)
 
-      write_frecord_from_image_files(
-          class_files, class_id, class_records_path, bboxes=bboxes)
+      write_fhdf5_from_image_files(
+        class_files, class_id, class_records_path, bboxes=bboxes)
 
     self.write_data_spec_pkl()
 
@@ -1160,9 +1142,9 @@ class TrafficSignConverter(DatasetConverter):
       'train', 'valid', and 'test' to a list of class integers.
     """
     return {
-        'train': [],
-        'valid': [],
-        'test': list(range(self.NUM_TEST_CLASSES))
+      'train': [],
+      'valid': [],
+      'test': list(range(self.NUM_TEST_CLASSES))
     }
 
   def create_dataset_specification_and_records(self):
@@ -1179,7 +1161,7 @@ class TrafficSignConverter(DatasetConverter):
     self.classes_per_split[learning_spec.Split.TEST] = len(test_classes)
 
     for class_id in test_classes:
-      logging.info('Creating record for class ID %d...', class_id)
+      logging.info('Creating hdf5 for class ID %d...', class_id)
       # The raw dataset file uncompresses to `GTSRB/Final_Training/Images/`.
       # The `Images` subdirectory contains 43 subdirectories (one for each
       # class) whose names are zero-padded, 5-digit strings representing the
@@ -1187,14 +1169,14 @@ class TrafficSignConverter(DatasetConverter):
       class_directory = os.path.join(self.data_root, 'Final_Training', 'Images',
                                      '{:05d}'.format(class_id))
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(class_id))
       self.class_names[class_id] = class_id
       # We skip `GT-?????.csv` files, which contain addditional annotations.
-      self.images_per_class[class_id] = write_tfrecord_from_directory(
-          class_directory,
-          class_id,
-          class_records_path,
-          files_to_skip=set(['GT-{:05d}.csv'.format(class_id)]))
+      self.images_per_class[class_id] = write_hdf5_from_directory(
+        class_directory,
+        class_id,
+        class_records_path,
+        files_to_skip=set(['GT-{:05d}.csv'.format(class_id)]))
 
     self.write_data_spec_pkl()
 
@@ -1236,9 +1218,9 @@ class MSCOCOConverter(DatasetConverter):
       categories = annotations['categories']
       if len(categories) != self.num_all_classes:
         raise ValueError(
-            'Total number of MSCOCO classes %d should be equal to the sum of '
-            'train, val, test classes %d.' %
-            (len(categories), self.num_all_classes))
+          'Total number of MSCOCO classes %d should be equal to the sum of '
+          'train, val, test classes %d.' %
+          (len(categories), self.num_all_classes))
       self.coco_categories = categories
 
     if box_scale_ratio < 1.0:
@@ -1256,8 +1238,8 @@ class MSCOCOConverter(DatasetConverter):
       'train', 'valid', and 'test' to a list of class integers.
     """
     logging.info(
-        'Created splits with %d train, %d validation and %d test classes.',
-        self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
+      'Created splits with %d train, %d validation and %d test classes.',
+      self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
 
     train_class_start = 0
     val_class_start = self.NUM_TRAIN_CLASSES
@@ -1267,15 +1249,15 @@ class MSCOCOConverter(DatasetConverter):
     shuffled_coco_id = [category['id'] for category in shuffled_categories]
 
     splits = {
-        'train':
-            shuffled_coco_id[train_class_start:train_class_start +
-                             self.NUM_TRAIN_CLASSES],
-        'valid':
-            shuffled_coco_id[val_class_start:val_class_start +
-                             self.NUM_VALID_CLASSES],
-        'test':
-            shuffled_coco_id[test_class_start:test_class_start +
-                             self.NUM_TEST_CLASSES]
+      'train':
+        shuffled_coco_id[train_class_start:train_class_start +
+                                           self.NUM_TRAIN_CLASSES],
+      'valid':
+        shuffled_coco_id[val_class_start:val_class_start +
+                                         self.NUM_VALID_CLASSES],
+      'test':
+        shuffled_coco_id[test_class_start:test_class_start +
+                                          self.NUM_TEST_CLASSES]
     }
     return splits
 
@@ -1289,7 +1271,7 @@ class MSCOCOConverter(DatasetConverter):
     # Derives new class ids that conform to DataConverter's contract.
     shuffled_coco_id = splits['train'] + splits['valid'] + splits['test']
     coco_id_to_class_id = {
-        coco_id: class_id for class_id, coco_id in enumerate(shuffled_coco_id)
+      coco_id: class_id for class_id, coco_id in enumerate(shuffled_coco_id)
     }
 
     for category in self.coco_categories:
@@ -1304,48 +1286,43 @@ class MSCOCOConverter(DatasetConverter):
       # The bounding box is represented as (x_topleft, y_topleft, width, height)
       bbox = annotation['bbox']
       coco_class_id = annotation['category_id']
-      with open(image_path) as f:
-        # The image shape is [?, ?, 3] and the type is uint8.
-        image = Image.open(f)
-        image = image.convert(mode='RGB')
-        image_w, image_h = image.size
+      image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+      image_w, image_h = image.size
 
-        def scale_box(bbox, scale_ratio):
-          x, y, w, h = bbox
-          x = x - 0.5 * w * (scale_ratio - 1.0)
-          y = y - 0.5 * h * (scale_ratio - 1.0)
-          w = w * scale_ratio
-          h = h * scale_ratio
-          return [x, y, w, h]
+      def scale_box(bbox, scale_ratio):
+        x, y, w, h = bbox
+        x = x - 0.5 * w * (scale_ratio - 1.0)
+        y = y - 0.5 * h * (scale_ratio - 1.0)
+        w = w * scale_ratio
+        h = h * scale_ratio
+        return [x, y, w, h]
 
-        x, y, w, h = scale_box(bbox, self.box_scale_ratio)
-        # Convert half-integer to full-integer representation.
-        # The Python Imaging Library uses a Cartesian pixel coordinate system,
-        # with (0,0) in the upper left corner. Note that the coordinates refer
-        # to the implied pixel corners; the centre of a pixel addressed as
-        # (0, 0) actually lies at (0.5, 0.5). Since COCO uses the later
-        # convention and we use PIL to crop the image, we need to convert from
-        # half-integer to full-integer representation.
-        xmin = max(int(round(x - 0.5)), 0)
-        ymin = max(int(round(y - 0.5)), 0)
-        xmax = min(int(round(x + w - 0.5)) + 1, image_w)
-        ymax = min(int(round(y + h - 0.5)) + 1, image_h)
-        image_crop = image.crop((xmin, ymin, xmax, ymax))
-        crop_width, crop_height = image_crop.size
-        if crop_width <= 0 or crop_height <= 0:
-          raise ValueError('crops are not valid.')
-        class_id = coco_id_to_class_id[coco_class_id]
+      x, y, w, h = scale_box(bbox, self.box_scale_ratio)
+      # Convert half-integer to full-integer representation.
+      # The Python Imaging Library uses a Cartesian pixel coordinate system,
+      # with (0,0) in the upper left corner. Note that the coordinates refer
+      # to the implied pixel corners; the centre of a pixel addressed as
+      # (0, 0) actually lies at (0.5, 0.5). Since COCO uses the later
+      # convention and we use PIL to crop the image, we need to convert from
+      # half-integer to full-integer representation.
+      xmin = max(int(round(x - 0.5)), 0)
+      ymin = max(int(round(y - 0.5)), 0)
+      xmax = min(int(round(x + w - 0.5)) + 1, image_w)
+      ymax = min(int(round(y + h - 0.5)) + 1, image_h)
+      image_crop = image[ymin:ymax, xmin:xmax, ...]
+      crop_width, crop_height = image_crop.shape[:2]
+      if crop_width <= 0 or crop_height <= 0:
+        raise ValueError('crops are not valid.')
+      class_id = coco_id_to_class_id[coco_class_id]
       return image_crop, class_id
 
-    class_h5py_writers = []
+    output_path = os.path.join(self.records_path,
+                               self.dataset_spec.file_pattern.format(self.dataset_spec.name))
+    fp = h5py.File(output_path, 'w')
+    dt = h5py.special_dtype(vlen=np.uint8)
     for class_id in range(self.num_all_classes):
-      output_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
-      fp = h5py.File(output_path, 'w')
-      dt = h5py.special_dtype(vlen=np.uint8)
-      fp.create_dataset("images", dtype=dt, shape=(0, ), maxshape=(None, ))
-      fp.create_dataset("labels", dtype=np.uint32, shape=(0, ), maxshape=(None, ))
-      class_h5py_writers.append(fp)
+      fp.create_dataset(str(class_id), dtype=dt, shape=(0,), maxshape=(None,))
+      fp.create_dataset(str(class_id), dtype=np.uint32, shape=(0,), maxshape=(None,))
 
     for i, annotation in enumerate(self.coco_instance_annotations):
       try:
@@ -1358,23 +1335,18 @@ class MSCOCOConverter(DatasetConverter):
         continue
 
       logging.info('writing image %d/%d', i,
-                      len(self.coco_instance_annotations))
+                   len(self.coco_instance_annotations))
 
-      # TODO(manzagop): refactor this, e.g. use write_tfrecord_from_image_files.
+      # TODO(manzagop): refactor this, e.g. use write_hdf5_from_image_files.
       image_crop_bytes = io.BytesIO()
       image_crop.save(image_crop_bytes, format='JPEG')
       image_crop_bytes.seek(0)
 
-      fp = class_h5py_writers[class_id]
-      fp["images"].resize(self.images_per_class[class_id] + 1, 0)
-      fp["labels"].resize(self.images_per_class[class_id] + 1, 0)
-      fp["images"][self.images_per_class[class_id]] = image_crop_bytes.getvalue()
-      fp["labels"][self.images_per_class[class_id]] = class_id
+      fp[str(class_id)].resize(self.images_per_class[class_id] + 1, 0)
+      fp[str(class_id)][self.images_per_class[class_id]] = image_crop_bytes
       self.images_per_class[class_id] += 1
 
-    for writer in class_h5py_writers:
-      writer.close()
-
+    fp.close()
     self.write_data_spec_pkl()
 
 
@@ -1397,40 +1369,13 @@ class ImageNetConverter(DatasetConverter):
 
     See HierarchicalDatasetSpecification for details.
     """
-    ilsvrc_2012_num_leaf_images_path = FLAGS.ilsvrc_2012_num_leaf_images_path
-    if not ilsvrc_2012_num_leaf_images_path:
-      ilsvrc_2012_num_leaf_images_path = os.path.join(self.records_path,
-                                                      'num_leaf_images.pkl')
-    specification = imagenet_specification.create_imagenet_specification(
-        learning_spec.Split, ilsvrc_2012_num_leaf_images_path)
-    split_subgraphs, images_per_class, _, _, _, _ = specification
-
-    # Maps each class id to the name of its class.
-    self.class_names = {}
-
-    self.dataset_spec = ds_spec.HierarchicalDatasetSpecification(
-        self.name, split_subgraphs, images_per_class, self.class_names,
-        self.records_path, DEFAULT_FILE_PATTERN)
-
-  def _get_synset_ids(self, split):
-    """Returns a list of synset id's of the classes assigned to split."""
-    return sorted([
-        synset.wn_id for synset in imagenet_specification.get_leaves(
-            self.dataset_spec.split_subgraphs[split])
-    ])
-
-  def create_dataset_specification_and_records(self):
-    """Create Records for the ILSVRC 2012 classes.
-
-    The field that requires modification in this case is only self.class_names.
-    """
     # Load lists of image names that are duplicates with images in other
     # datasets. They will be skipped from ImageNet.
-    files_to_skip = set()
+    self.files_to_skip = set()
     for other_dataset in ('Caltech101', 'Caltech256', 'CUBirds'):
       duplicates_file = os.path.join(
-          ILSCRC_DUPLICATES_PATH,
-          'ImageNet_{}_duplicates.txt'.format(other_dataset))
+        ILSCRC_DUPLICATES_PATH,
+        'ImageNet_{}_duplicates.txt'.format(other_dataset))
 
       with open(duplicates_file) as fd:
         duplicates = fd.read()
@@ -1446,8 +1391,35 @@ class ImageNetConverter(DatasetConverter):
         # Extract only the 'synset_imgnumber.JPG' part.
         file_path = l.split('#')[0].strip()
         file_name = os.path.basename(file_path)
-        files_to_skip.add(file_name)
+        self.files_to_skip.add(file_name)
 
+    ilsvrc_2012_num_leaf_images_path = FLAGS.ilsvrc_2012_num_leaf_images_path
+    if not ilsvrc_2012_num_leaf_images_path:
+      ilsvrc_2012_num_leaf_images_path = os.path.join(self.records_path,
+                                                      'num_leaf_images.pkl')
+    specification = imagenet_specification.create_imagenet_specification(
+      learning_spec.Split, self.files_to_skip, ilsvrc_2012_num_leaf_images_path)
+    split_subgraphs, images_per_class, _, _, _, _ = specification
+
+    # Maps each class id to the name of its class.
+    self.class_names = {}
+
+    self.dataset_spec = ds_spec.HierarchicalDatasetSpecification(
+      self.name, split_subgraphs, images_per_class, self.class_names,
+      self.records_path, DEFAULT_FILE_PATTERN)
+
+  def _get_synset_ids(self, split):
+    """Returns a list of synset id's of the classes assigned to split."""
+    return sorted([
+      synset.wn_id for synset in imagenet_specification.get_leaves(
+        self.dataset_spec.split_subgraphs[split])
+    ])
+
+  def create_dataset_specification_and_records(self):
+    """Create records for the ILSVRC 2012 classes.
+
+    The field that requires modification in this case is only self.class_names.
+    """
     # Get a list of synset id's assigned to each split.
     train_synset_ids = self._get_synset_ids(learning_spec.Split.TRAIN)
     valid_synset_ids = self._get_synset_ids(learning_spec.Split.VALID)
@@ -1458,11 +1430,11 @@ class ImageNetConverter(DatasetConverter):
     # for every ILSVRC 2012 synset, named by that synset's WordNet ID
     # (e.g. n15075141) and containing all images of that synset.
     set_of_directories = set(
-        entry for entry in os.listdir(self.data_root)
-        if os.path.isdir(os.path.join(self.data_root, entry)))
+      entry for entry in os.listdir(self.data_root)
+      if os.path.isdir(os.path.join(self.data_root, entry)))
     assert set_of_directories == set(all_synset_ids), (
-        'self.data_root should contain a directory whose name is the WordNet '
-        "id of each synset that is a leaf of any split's subgraph.")
+      'self.data_root should contain a directory whose name is the WordNet '
+      "id of each synset that is a leaf of any split's subgraph.")
 
     # By construction of all_synset_ids, we are guaranteed to get train synsets
     # before validation synsets, and validation synsets before test synsets.
@@ -1471,17 +1443,17 @@ class ImageNetConverter(DatasetConverter):
       self.class_names[class_label] = synset_id
       class_path = os.path.join(self.data_root, synset_id)
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_label))
+        self.records_path, self.dataset_spec.file_pattern.format(self.dataset_spec.name))
 
-      # Create and write the tf.Record of the examples of this class.
+      # Create and write the hdf5 of the examples of this class.
       # Image files for ImageNet do not necessarily come from a canonical
       # source, so pass 'skip_on_error' to be more resilient and avoid crashes
-      write_tfrecord_from_directory(
-          class_path,
-          class_label,
-          class_records_path,
-          files_to_skip=files_to_skip,
-          skip_on_error=True)
+      num_images = write_hdf5_from_directory(
+        class_path,
+        class_label,
+        class_records_path,
+        files_to_skip=self.files_to_skip,
+        skip_on_error=True)
 
 
 class FungiConverter(DatasetConverter):
@@ -1510,7 +1482,7 @@ class FungiConverter(DatasetConverter):
       0 to N-1, with N the total number of classes in the dataset)..
     """
     train_inds, valid_inds, test_inds = gen_rand_split_inds(
-        self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
+      self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES)
     splits = {'train': train_inds, 'valid': valid_inds, 'test': test_inds}
     return splits
 
@@ -1565,7 +1537,7 @@ class FungiConverter(DatasetConverter):
     class_filepaths = collections.defaultdict(list)
     for image in image_list:
       class_filepaths[image['class']].append(
-          os.path.join(self.data_root, image['file_name']))
+        os.path.join(self.data_root, image['file_name']))
 
     # Class IDs are constructed in such a way that
     #   - training class IDs lie in [0, num_train_classes),
@@ -1574,15 +1546,15 @@ class FungiConverter(DatasetConverter):
     #   - test class IDs lie in
     #     [num_train_classes + num_validation_classes, num_classes).
     for class_id, class_label in enumerate(all_classes):
-      logging.info('Creating record for class ID %d...' % class_id)
+      logging.info('Creating hdf5 for class ID %d...' % class_id)
       class_paths = class_filepaths[class_label]
       class_records_path = os.path.join(
-          self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(class_id))
       self.class_names[class_id] = class_label
       self.images_per_class[class_id] = len(class_paths)
 
-      # Create and write the tf.Record of the examples of this class
-      write_tfrecord_from_image_files(class_paths, class_id, class_records_path)
+      # Create and write the hdf5 of the examples of this class
+      write_hdf5_from_image_files(class_paths, class_id, class_records_path)
 
     self.write_data_spec_pkl()
 
@@ -1610,7 +1582,7 @@ class MiniImageNetConverter(DatasetConverter):
       'train', 'valid', and 'test' to a list of class names.
     """
     start_stop = np.cumsum([
-        0, self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES
+      0, self.NUM_TRAIN_CLASSES, self.NUM_VALID_CLASSES, self.NUM_TEST_CLASSES
     ])
     train_inds = list(range(start_stop[0], start_stop[1]))
     valid_inds = list(range(start_stop[1], start_stop[2]))
@@ -1640,17 +1612,17 @@ class MiniImageNetConverter(DatasetConverter):
       # We sort class names to make the dataset creation deterministic
       names = sorted(data['class_dict'].keys())
       for class_id, class_name in zip(classes, names):
-        logging.info('Creating record class %d', class_id)
+        logging.info('Creating hdf5 class %d', class_id)
         class_records_path = os.path.join(self.records_path,
-                                          self.file_pattern.format(class_id))
+                                        self.file_pattern.format(class_id))
         self.class_names[class_id] = class_name
         indices = data['class_dict'][class_name]
         self.images_per_class[class_id] = len(indices)
 
         writer = h5py.File(class_records_path, 'w')
         dt = h5py.special_dtype(vlen=np.uint8)
-        writer.create_dataset("images", dtype=dt, shape=(len(indices), ))
-        writer.create_dataset("labels", dtype=np.uint32, shape=(len(indices), ))
+        writer.create_dataset("images", dtype=dt, shape=(len(indices),))
+        writer.create_dataset("labels", dtype=np.uint32, shape=(len(indices),))
         for i, image in enumerate(data['image_data'][indices]):
           img = Image.fromarray(image)
           buf = io.BytesIO()

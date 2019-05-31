@@ -22,20 +22,21 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import cPickle as pkl
+import pickle as pkl
 import os
-
-import gin.tf
-from meta_dataset import learner
+import sys
+import gin
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# from meta_dataset import learner
 # The following import is needed for gin to know about DataConfig.
-from meta_dataset.data import config  # pylint: disable=unused-import
-from meta_dataset.data import dataset_spec as dataset_spec_lib
+#from meta_dataset.data import config  # pylint: disable=unused-import
+#from meta_dataset.data import dataset_spec as dataset_spec_lib
 from meta_dataset.data import learning_spec
-from meta_dataset.data import pipeline
-from meta_dataset.data import providers
+#from meta_dataset.data import pipeline
+#from meta_dataset.data import providers
 import numpy as np
-import tensorflow as tf
-from tensorflow.core.protobuf import rewriter_config_pb2  # pylint: disable=g-direct-tensorflow-import
+#import tensorflow as tf
+#from tensorflow.core.protobuf import rewriter_config_pb2  # pylint: disable=g-direct-tensorflow-import
 
 # The following flag specifies substrings of variable names that should not be
 # reloaded. `num_left_in_epoch' is a variable that influences the behavior of
@@ -48,12 +49,12 @@ from tensorflow.core.protobuf import rewriter_config_pb2  # pylint: disable=g-di
 # If we are instead continuing the training of the baseline after pre-emption
 # for example, `finetune' should not be included in this list since it should.
 # then be reloaded. `linear_classifier' plays that role but for the MAML model.
-tf.flags.DEFINE_string(
-    'omit_from_saving_and_reloading', 'num_left_in_epoch,finetune,'
-    'linear_classifier', 'A comma-separated string of substrings such that all '
-    'variables containing them should not be saved and reloaded.')
-
-FLAGS = tf.flags.FLAGS
+#tf.flags.DEFINE_string(
+#    'omit_from_saving_and_reloading', 'num_left_in_epoch,finetune,'
+#    'linear_classifier', 'A comma-separated string of substrings such that all '
+#    'variables containing them should not be saved and reloaded.')
+#
+#FLAGS = tf.flags.FLAGS
 
 # Enable TensorFlow optimizations. It can add a few minutes to the first
 # calls to session.run(), but decrease memory usage.
@@ -67,11 +68,11 @@ ENABLE_DATA_OPTIMIZATIONS = True
 EMBEDDING_KEYWORDS = ('conv', 'resnet')
 
 DATASETS_WITH_EXAMPLE_SPLITS = ()
-TF_DATA_OPTIONS = tf.data.Options()
-if ENABLE_DATA_OPTIMIZATIONS:
+#TF_DATA_OPTIONS = tf.data.Options()
+#if ENABLE_DATA_OPTIMIZATIONS:
   # The Options object can be used to control which static or dynamic
   # optimizations to apply.
-  TF_DATA_OPTIONS.experimental_optimization.apply_default_optimizations = False
+#  TF_DATA_OPTIONS.experimental_optimization.apply_default_optimizations = False
 
 
 def apply_dataset_options(dataset):

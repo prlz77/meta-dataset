@@ -12,7 +12,7 @@ logging.getLogger().setLevel(logging.INFO)
 from meta_dataset.data.dataset_spec import DatasetSpecification
 from meta_dataset.data.learning_spec import Split
 from meta_dataset.datasets.datasets_test import make_dummy_dataset
-from meta_dataset.datasets.multisource_datasets import make_multisource_episode_dataset
+from meta_dataset.datasets.datasets import make_multisource_episode_dataset
 
 
 # DatasetSpecification to use in tests
