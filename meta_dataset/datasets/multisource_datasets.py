@@ -23,8 +23,9 @@ class MultisourceEpisodeDataset(Dataset):
         offset = 0
         for dataset in datasets:
             dataset.epoch_size = self.epoch_size
-            dataset.offset = offset
-            offset += dataset.num_classes
+            if add_dataset_offset:
+              dataset.offset = offset
+              offset += dataset.num_classes
 
     def build_episode_indices(self):
         """ Generates the indices for all the episodes in an epoch.

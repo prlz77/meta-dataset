@@ -16,6 +16,8 @@ from functools import partial
 import logging
 import hashlib
 import shutil
+import cv2
+import numpy as np
 
 FLAGS = argparse.FLAGS
 
@@ -121,12 +123,12 @@ def parse_augmentation(augmentation_spec, image_size):
     amount = augmentation_spec.jitter_amount
     _transforms.append(transforms.RandomCrop(image_size,
                                              padding=amount))
-  _transforms.append(transforms.ToTensor())
   return _transforms
 
 
 @gin.configurable('process_episode')
-def get_transforms(image_size,
+def get_transforms(name,
+                   image_size,
                    support_data_augmentation=None,
                    query_data_augmentation=None,
                    *args,
@@ -145,6 +147,11 @@ def get_transforms(image_size,
   """
   support_transforms = parse_augmentation(support_data_augmentation, image_size)
   query_transforms = parse_augmentation(query_data_augmentation, image_size)
+  if name in ["quickdraw", "omniglot"]:
+    size = int(np.ceil(image_size / 32.)) * 32 + 1
+    support_transforms.append(transforms.Lambda(lambda im: cv2.resize(im, (size, size), cv2.INTER_CUBIC)))
+    query_transforms.append(transforms.Lambda(lambda im: cv2.resize(im, (size, size), cv2.INTER_CUBIC)))
+  support_transforms.append(transforms.ToTensor())
   return support_transforms, query_transforms
 
 
@@ -190,12 +197,17 @@ class MetaDataset(object):
                                   FLAGS.eval_imbalance_dataset,
                                   self.data_config.image_height, )
 
-    self.support_transforms, self.query_transforms = get_transforms(self.data_config.image_height)
+    self.support_transforms = {}
+    self.query_transforms = {}
+    for dataset in self.datasets:
+      support_transforms, query_transforms = get_transforms(dataset, self.data_config.image_height)
+      self.support_transforms[dataset] = support_transforms
+      self.query_transforms[dataset] = support_transforms
 
     if len(self.query_transforms) > 0:
-      logging.warning("Different transforms for the query set not supported")
+      logging.warning("Different transforms for the query set not supported. We fallback to same transform.")
 
-    self.support_transforms = transforms.Compose(self.support_transforms)
+    self.support_transforms = {k: transforms.Compose(v) for k,v in self.support_transforms.items()}
 
     if self.valid_benchmark_spec is None:
       # This means that ImageNet is not a dataset in the given benchmark spec.
@@ -282,7 +294,7 @@ class MetaDataset(object):
         batch_size=batch_size,
         reshuffle=self.data_config.shuffle_buffer_size > 0,
         image_size=image_shape,
-        transforms=self.support_transforms)
+        transforms=self.support_transforms[dataset_spec_list[0].name])
     elif len(dataset_spec_list) > 1:
       dataset = datasets_lib.make_multisource_batch_dataset(
         dataset_spec_list,
@@ -373,7 +385,7 @@ class MetaDataset(object):
         num_support=num_train_examples,
         num_query=num_test_examples,
         reshuffle=self.data_config.shuffle_buffer_size > 0,
-        transforms=self.support_transforms)
+        transforms=self.support_transforms[dataset_spec_list[0].name])
     elif len(dataset_spec_list) > 1:
       dataset = datasets_lib.make_multisource_episode_dataset(
         dataset_spec_list,
