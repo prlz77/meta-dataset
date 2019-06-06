@@ -132,6 +132,7 @@ class ClassDataset(Dataset):
     Returns: list. The cache loaded in main memory
 
     """
+    cache_folder = os.path.join(cache_folder, self.name)
     try:
       os.makedirs(cache_folder)
       self.save_cache(cache_folder, epochs)
@@ -157,7 +158,7 @@ class ClassDataset(Dataset):
       t += 1
       if t > 3600:
         raise TimeoutError
-    self.cache = torch.load(os.path.join(cache_folder, "%s.pt" %(self.name)))
+    self.cache = torch.load(os.path.join(cache_folder, "cache.pt"))
     assert (len(self.cache) >= epochs)
     logging.info("Loaded cache from %s" % cache_folder)
 
@@ -183,7 +184,7 @@ class ClassDataset(Dataset):
         queue.get(block=True)
       cache = _cache.get()
       del queue
-    torch.save(cache, os.path.join(cache_folder, "%s.pt" %self.name))
+    torch.save(cache, os.path.join(cache_folder, "cache.pt"))
 
     with open(os.path.join(cache_folder, 'ready'), 'w') as outfile:
       outfile.write('\n')

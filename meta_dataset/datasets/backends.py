@@ -100,14 +100,18 @@ class Hdf5Backend(Backend):
 
     dataset = self.h5fp[class_id]
 
-    argind = np.argsort(indices)
-    images = dataset[indices[argind].tolist(), ...]
+    unique_indices = np.unique(indices)
+    sorted_indices = np.sort(unique_indices).tolist()
+    images = dataset[sorted_indices, ...]
+    images = [self.transforms(im) for im in images]
 
-    buffer = [None] * len(images)
-    for i, j in enumerate(argind):
-      buffer[j] = self.transforms(images[i])
-
-    return buffer
+    if len(unique_indices) < len(indices):
+      buffer = [None] * len(indices)
+      for i, j in enumerate(indices):
+        buffer[i] = images[sorted_indices.index(j)]
+      return buffer
+    else:
+      return images
 
   def __del__(self):
     if hasattr(self, "h5fp"):

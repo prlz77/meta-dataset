@@ -34,7 +34,7 @@ from meta_dataset.data import imagenet_specification
 import numpy as np
 
 # Module-level random number generator. Initialized randomly, can be seeded.
-RNG = np.random.RandomState(seed=1234)
+RNG = np.random.RandomState(seed=None)
 
 # How the value of MAX_SPANNING_LEAVES_ELIGIBLE was selected.
 # This controls the upper bound on the number of leaves that an internal node

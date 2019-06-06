@@ -54,13 +54,12 @@ def make_one_source_batch_dataset(dataset_spec,
 
   return dataset
 
-def make_multisource_batch_pipeline(dataset_spec_list,
+def make_multisource_batch_dataset(dataset_spec_list,
                                     split,
                                     num_train_classes,
                                     num_test_classes,
                                     epoch_size,
                                     batch_size,
-                                    add_dataset_offset,
                                     pool=None,
                                     reshuffle=True,
                                     image_size=None,
@@ -71,8 +70,6 @@ def make_multisource_batch_pipeline(dataset_spec_list,
     dataset_spec_list: A list of DatasetSpecification, one for each source.
     split: A learning_spec.Split object identifying the source split.
     batch_size: An int representing the max number of examples in each batch.
-    add_dataset_offset: A Boolean, whether to add an offset to each dataset's
-      targets, so that each target is unique across all datasets.
     pool: String (optional), for example-split datasets, which example split to
       use ('valid', or 'test'), used at meta-test time only.
     shuffle_buffer_size: int or None, number of examples in the buffer used for
@@ -88,7 +85,7 @@ def make_multisource_batch_pipeline(dataset_spec_list,
   sources = []
   for dataset_spec in dataset_spec_list:
     if ".h5" in dataset_spec.file_pattern:
-      backend = Hdf5Backend(dataset_spec, image_size, transforms)
+      backend = Hdf5Backend(dataset_spec, image_size, transforms[dataset_spec.name])
 
     dataset = BatchClassDataset(backend, dataset_spec, split, num_train_classes,
                                 num_test_classes,
@@ -97,9 +94,9 @@ def make_multisource_batch_pipeline(dataset_spec_list,
                                 shuffle_seed=None)
     sources.append(dataset)
 
-  return MultisourceEpisodeDataset(sources, epoch_size=epoch_size, add_dataset_offset=add_dataset_offset)
+  return MultisourceEpisodeDataset(sources, epoch_size=epoch_size)
 
-def make_one_source_episode_pipeline(dataset_spec,
+def make_one_source_episode_dataset(dataset_spec,
                                      use_dag_ontology,
                                      use_bilevel_ontology,
                                      split,

@@ -202,27 +202,42 @@ def write_hdf5_from_npy_single_channel(class_npy_file, class_label,
     """
     # We make the assumption that the images are square.
     side = int(np.sqrt(img.shape[0]))
-    img.reshape((side, side))
-    return cv2.imencode(".jpg", img)
+    img = img.reshape((side, side))
+    return cv2.imencode(".jpg", img)[1].ravel()
 
   with open(class_npy_file, 'rb') as f:
     imgs = np.load(f)
 
-  # If the values are in the range 0-1, bring them to the range 0-255.
-  if imgs.dtype == np.bool:
-    imgs = imgs.astype(np.uint8)
-    imgs *= 255
+  def load_images(imgs):
+    # If the values are in the range 0-1, bring them to the range 0-255.
+    if imgs.dtype == np.bool:
+      imgs = imgs.astype(np.uint8)
+      imgs *= 255
+    ret = []
+    for im in imgs:
+      ret.append(load_image(im))
+    return ret
 
-  writer = h5py.File(output_path, 'r+')
+  workers = 16
+  chunk_size = len(imgs) // workers
+  offsets = []
+  for i in range(workers):
+    start = i * chunk_size
+    end = (i + 1) * chunk_size
+    if i == workers - 1:
+      end = len(imgs)
+    offsets.append((start, end))
+  ret = Parallel(workers)(delayed(load_images)(imgs[start:end]) for start, end in offsets)
+
+  writer = h5py.File(output_path, 'a')
   dt = h5py.special_dtype(vlen=np.uint8)
   writer.create_dataset(str(class_label), dtype=dt, shape=(len(imgs),))
-  writer.create_dataset("labels", dtype=np.uint32, shape=(len(imgs),))
-  # Takes a row each time, i.e. a different image (of the same class_label).
-  for i, image in enumerate(imgs):
-    # Compress to JPEG before writing
-    img = load_image(image)
-    writer["images"][i] = img
-    writer["labels"][i] = class_label
+
+  counter = 0
+  for chunk in ret:
+    for img in chunk:
+      writer[str(class_label)][counter] = img
+      counter += 1
 
   writer.close()
   return len(imgs)
@@ -281,7 +296,8 @@ def write_hdf5_from_image_files(class_files,
         im = 255 - im
       if FLAGS.save_ready_to_load > 0:
         size = FLAGS.save_ready_to_load
-        im = cv2.resize(im, (size, size), interpolation=cv2.INTER_CUBIC)
+        aligned_size = int(np.ceil(size / 32.0)) * 32 + 1
+        im = cv2.resize(im, (aligned_size, aligned_size), interpolation=cv2.INTER_CUBIC)
       if output_format is not None:
         im = cv2.imencode(output_format, im)[1]
       return im
@@ -292,8 +308,6 @@ def write_hdf5_from_image_files(class_files,
   writer = h5py.File(output_path, 'a')
   dt = h5py.special_dtype(vlen=np.uint8)
   writer.create_dataset(str(class_label), dtype=dt, shape=(len(class_files),))
-  if "labels" not in writer.keys():
-    writer.create_dataset("labels", dtype=np.uint8, shape=(len(class_files),))
   written_images_count = 0
   bboxes = [None] * len(class_files) if bboxes is None else bboxes
   with Parallel(n_jobs=16) as parallel:
@@ -302,7 +316,6 @@ def write_hdf5_from_image_files(class_files,
       written_images_count += len(imgs)
       for i, img in enumerate(imgs):
         writer[str(class_label)][i] = img.ravel()
-        writer["labels"][i] = class_label
 
       pbar.update(written_images_count)
   assert (written_images_count == len(class_files))
@@ -671,7 +684,7 @@ class OmniglotConverter(DatasetConverter):
         class_label = len(self.class_names)
         class_records_path = os.path.join(
           self.records_path,
-          self.dataset_spec.file_pattern.format(class_label))
+          self.dataset_spec.file_pattern.format(self.name))
         self.class_names[class_label] = '{}-{}'.format(alphabet_folder_name,
                                                        char_folder_name)
         self.images_per_class[class_label] = len(
@@ -768,11 +781,11 @@ class QuickdrawConverter(DatasetConverter):
       split: an instance of learning_spec.Split
       split_class_names: the list of names of classes belonging to split
     """
-    for class_name in split_class_names:
+    for class_name in tqdm(split_class_names):
       self.classes_per_split[split] += 1
       class_label = len(self.class_names)
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_label))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
 
       # The names of the files in self.data_root for Quickdraw are of the form
       # class_name.npy, for example airplane.npy.
@@ -868,7 +881,7 @@ class CUBirdsConverter(DatasetConverter):
     for class_id, class_label in enumerate(all_classes):
       logging.info('Creating hdf5 for class ID %d...', class_id)
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
       self.class_names[class_id] = class_label
       class_directory = os.path.join(image_root_folder, class_label)
       self.images_per_class[class_id] = len(
@@ -918,7 +931,7 @@ class VGGFlowerConverter(DatasetConverter):
     self.classes_per_split[learning_spec.Split.TEST] = len(test_classes)
 
     imagelabels_path = os.path.join(self.data_root, 'imagelabels.mat')
-    with open(imagelabels_path, 'r') as f:
+    with open(imagelabels_path, 'rb') as f:
       labels = loadmat(f)['labels'][0]
     filepaths = collections.defaultdict(list)
     for i, label in enumerate(labels):
@@ -936,7 +949,7 @@ class VGGFlowerConverter(DatasetConverter):
       logging.info('Creating hdf5 for class ID %d...', class_id)
       class_paths = filepaths[class_label]
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
       self.class_names[class_id] = class_label
       self.images_per_class[class_id] = len(class_paths)
 
@@ -994,7 +1007,7 @@ class DTDConverter(DatasetConverter):
       class_name = class_names[class_label]
       class_directory = os.path.join(self.data_root, 'images', class_name)
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
       self.class_names[class_id] = class_name
       # 'waffled' class directory has a leftover '.directory' file.
       files_to_skip = set()
@@ -1111,11 +1124,11 @@ class AircraftConverter(DatasetConverter):
         for name in sorted(variants_to_names[class_name])
       ]
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
       self.class_names[class_id] = class_name
       self.images_per_class[class_id] = len(class_files)
 
-      write_fhdf5_from_image_files(
+      write_hdf5_from_image_files(
         class_files, class_id, class_records_path, bboxes=bboxes)
 
     self.write_data_spec_pkl()
@@ -1169,7 +1182,7 @@ class TrafficSignConverter(DatasetConverter):
       class_directory = os.path.join(self.data_root, 'Final_Training', 'Images',
                                      '{:05d}'.format(class_id))
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
       self.class_names[class_id] = class_id
       # We skip `GT-?????.csv` files, which contain addditional annotations.
       self.images_per_class[class_id] = write_hdf5_from_directory(
@@ -1287,7 +1300,7 @@ class MSCOCOConverter(DatasetConverter):
       bbox = annotation['bbox']
       coco_class_id = annotation['category_id']
       image = cv2.imread(image_path, cv2.IMREAD_COLOR)
-      image_w, image_h = image.size
+      image_w, image_h = image.shape[:2]
 
       def scale_box(bbox, scale_ratio):
         x, y, w, h = bbox
@@ -1313,17 +1326,18 @@ class MSCOCOConverter(DatasetConverter):
       crop_width, crop_height = image_crop.shape[:2]
       if crop_width <= 0 or crop_height <= 0:
         raise ValueError('crops are not valid.')
+      if FLAGS.save_ready_to_load > 0:
+        size = FLAGS.save_ready_to_load
+        aligned_size = int(np.ceil(size / 32.0)) * 32 + 1
+        image_crop = cv2.resize(image_crop, (aligned_size, aligned_size), interpolation=cv2.INTER_CUBIC)
       class_id = coco_id_to_class_id[coco_class_id]
+      image_crop = cv2.imencode(".jpg", image_crop)[1].ravel()
       return image_crop, class_id
 
     output_path = os.path.join(self.records_path,
                                self.dataset_spec.file_pattern.format(self.dataset_spec.name))
-    fp = h5py.File(output_path, 'w')
+    fp = h5py.File(output_path, 'a')
     dt = h5py.special_dtype(vlen=np.uint8)
-    for class_id in range(self.num_all_classes):
-      fp.create_dataset(str(class_id), dtype=dt, shape=(0,), maxshape=(None,))
-      fp.create_dataset(str(class_id), dtype=np.uint32, shape=(0,), maxshape=(None,))
-
     for i, annotation in enumerate(self.coco_instance_annotations):
       try:
         image_crop, class_id = get_image_crop_and_class_id(annotation)
@@ -1334,16 +1348,14 @@ class MSCOCOConverter(DatasetConverter):
         logging.warning('Image can not be cropped and will be skipped.')
         continue
 
+      if str(class_id) not in fp.keys():
+        fp.create_dataset(str(class_id), dtype=dt, shape=(0,), maxshape=(None,))
+
       logging.info('writing image %d/%d', i,
                    len(self.coco_instance_annotations))
 
-      # TODO(manzagop): refactor this, e.g. use write_hdf5_from_image_files.
-      image_crop_bytes = io.BytesIO()
-      image_crop.save(image_crop_bytes, format='JPEG')
-      image_crop_bytes.seek(0)
-
       fp[str(class_id)].resize(self.images_per_class[class_id] + 1, 0)
-      fp[str(class_id)][self.images_per_class[class_id]] = image_crop_bytes
+      fp[str(class_id)][self.images_per_class[class_id]] = image_crop
       self.images_per_class[class_id] += 1
 
     fp.close()
@@ -1506,6 +1518,9 @@ class FungiConverter(DatasetConverter):
     with open(os.path.join(self.data_root, 'val.json')) as f:
       original_val = json.load(f)
 
+    def cmp(a, b):
+      return (a > b) - (a < b)
+
     # The categories (classes) for train and validation should be the same.
     assert cmp(original_train['categories'], original_val['categories']) == 0
     class_labels = ([c['id'] for c in original_train['categories']])
@@ -1549,7 +1564,7 @@ class FungiConverter(DatasetConverter):
       logging.info('Creating hdf5 for class ID %d...' % class_id)
       class_paths = class_filepaths[class_label]
       class_records_path = os.path.join(
-        self.records_path, self.dataset_spec.file_pattern.format(class_id))
+        self.records_path, self.dataset_spec.file_pattern.format(self.name))
       self.class_names[class_id] = class_label
       self.images_per_class[class_id] = len(class_paths)
 
@@ -1614,22 +1629,20 @@ class MiniImageNetConverter(DatasetConverter):
       for class_id, class_name in zip(classes, names):
         logging.info('Creating hdf5 class %d', class_id)
         class_records_path = os.path.join(self.records_path,
-                                        self.file_pattern.format(class_id))
+                                          self.file_pattern.format(self.name))
         self.class_names[class_id] = class_name
         indices = data['class_dict'][class_name]
         self.images_per_class[class_id] = len(indices)
 
-        writer = h5py.File(class_records_path, 'w')
+        writer = h5py.File(class_records_path, 'a')
         dt = h5py.special_dtype(vlen=np.uint8)
         writer.create_dataset("images", dtype=dt, shape=(len(indices),))
-        writer.create_dataset("labels", dtype=np.uint32, shape=(len(indices),))
         for i, image in enumerate(data['image_data'][indices]):
           img = Image.fromarray(image)
           buf = io.BytesIO()
           img.save(buf, format='JPEG')
           buf.seek(0)
           writer["images"][i] = bytearray(buf.getvalue())
-          writer["labels"][i] = class_id
         writer.close()
 
     self.write_data_spec_pkl()

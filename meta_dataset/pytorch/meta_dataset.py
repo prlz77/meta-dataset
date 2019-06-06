@@ -113,13 +113,14 @@ def parse_augmentation(augmentation_spec, image_size):
     """
     return (x * 2) - 1
 
-  _transforms = [transforms.ToPILImage()]
+  _transforms = []
   if augmentation_spec.enable_gaussian_noise and \
       augmentation_spec.gaussian_noise_std > 0:
     f = partial(gaussian_noise, std=augmentation_spec.gaussian_noise_std)
     _transforms.append(transforms.Lambda(f))
   if augmentation_spec.enable_jitter and \
       augmentation_spec.jitter_amount > 0:
+    _transforms.append(transforms.ToPILImage())
     amount = augmentation_spec.jitter_amount
     _transforms.append(transforms.RandomCrop(image_size,
                                              padding=amount))
@@ -145,13 +146,18 @@ def get_transforms(name,
   Returns:
 
   """
-  support_transforms = parse_augmentation(support_data_augmentation, image_size)
-  query_transforms = parse_augmentation(query_data_augmentation, image_size)
+  # Numpy transforms
+  support_transforms = []
+  query_transforms = []
   if name in ["quickdraw", "omniglot"]:
     size = int(np.ceil(image_size / 32.)) * 32 + 1
     support_transforms.append(transforms.Lambda(lambda im: cv2.resize(im, (size, size), cv2.INTER_CUBIC)))
     query_transforms.append(transforms.Lambda(lambda im: cv2.resize(im, (size, size), cv2.INTER_CUBIC)))
+  support_transforms += parse_augmentation(support_data_augmentation, image_size)
+  query_transforms += parse_augmentation(query_data_augmentation, image_size)
+  # PIL transforms
   support_transforms.append(transforms.ToTensor())
+  # Tensor transforms
   return support_transforms, query_transforms
 
 
@@ -335,7 +341,7 @@ class MetaDataset(object):
       for source in sorted(sources):
         with open(source, 'rb') as infile:
           m.update(infile.read())
-      critical_flags = ["gin_config", "gin_bindings"]
+      critical_flags = []
       for flag in critical_flags:
         m.update(str(getattr(FLAGS, flag)).encode())
 
@@ -374,7 +380,7 @@ class MetaDataset(object):
 
     use_dag_ontology = has_dag_ontology[0]
     if len(dataset_spec_list) == 1:
-      dataset = datasets_lib.make_one_source_episode_pipeline(
+      dataset = datasets_lib.make_one_source_episode_dataset(
         dataset_spec_list[0],
         use_dag_ontology=use_dag_ontology,
         use_bilevel_ontology=has_bilevel_ontology[0],

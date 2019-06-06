@@ -17,7 +17,12 @@ class MultisourceEpisodeDataset(Dataset):
             datasets: a list of pytorch datasets
             epoch_size: the number of iterations per epoch
         """
+        self.name = "all"
         self.datasets = datasets
+        self.episodic = self.datasets[0].episodic
+        self.num_classes = sum([dataset.num_classes for dataset in self.datasets])
+        for dataset in self.datasets:
+            assert(dataset.episodic == self.episodic)
         self.epoch_size = epoch_size
 
         offset = 0
@@ -26,6 +31,19 @@ class MultisourceEpisodeDataset(Dataset):
             if add_dataset_offset:
               dataset.offset = offset
               offset += dataset.num_classes
+
+    def load_save_cache(self, cache_folder, epochs):
+        """ Generates batch/episode indices and saves them into a torch file
+
+        Args:
+          cache_folder: string. folder where to save the cached indices
+          epochs: int. number of epochs to generate
+
+        Returns: list. Cached indices.
+
+        """
+        for dataset in self.datasets:
+            dataset.load_save_cache(cache_folder, epochs)
 
     def build_episode_indices(self):
         """ Generates the indices for all the episodes in an epoch.
