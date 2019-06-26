@@ -5,7 +5,7 @@ import h5py
 import meta_dataset.data as data
 import meta_dataset.data.sampling as sampling
 from meta_dataset.datasets.multisource_datasets import MultisourceEpisodeDataset
-from meta_dataset.datasets.backends import Hdf5Backend
+from meta_dataset.datasets.backends import Backend
 from meta_dataset.datasets.class_dataset import EpisodicClassDataset, BatchClassDataset
 import meta_dataset.data.learning_spec as learning_spec
 import torchvision.transforms as transforms_lib
@@ -44,7 +44,10 @@ def make_one_source_batch_dataset(dataset_spec,
   """
 
   if ".h5" in dataset_spec.file_pattern:
-    backend = Hdf5Backend(dataset_spec, image_size, transforms)
+    backend = Backend(dataset_spec=dataset_spec,
+                      split=split,
+                      image_size=image_size,
+                      transforms=transforms)
 
   dataset = BatchClassDataset(backend, dataset_spec, split, num_train_classes,
                               num_test_classes,
@@ -85,7 +88,10 @@ def make_multisource_batch_dataset(dataset_spec_list,
   sources = []
   for dataset_spec in dataset_spec_list:
     if ".h5" in dataset_spec.file_pattern:
-      backend = Hdf5Backend(dataset_spec, image_size, transforms[dataset_spec.name])
+      backend = Backend(dataset_spec=dataset_spec,
+                        split=split,
+                        image_size=image_size,
+                        transforms=transforms[dataset_spec.name])
 
     dataset = BatchClassDataset(backend, dataset_spec, split, num_train_classes,
                                 num_test_classes,
@@ -153,7 +159,10 @@ def make_one_source_episode_dataset(dataset_spec,
     num_query=num_query)
 
   if ".h5" in dataset_spec.file_pattern:
-    backend = Hdf5Backend(dataset_spec, image_size, transforms)
+    backend = Backend(dataset_spec=dataset_spec,
+                      split=split,
+                      image_size=image_size,
+                      transforms=transforms)
   dataset = EpisodicClassDataset(backend, dataset_spec, split, sampler,
                                  epoch_size, pool,
                                  reshuffle=reshuffle,
@@ -223,7 +232,10 @@ def make_multisource_episode_dataset(dataset_spec_list,
       num_query=num_query)
 
     if ".h5" in dataset_spec.file_pattern:
-      backend = Hdf5Backend(dataset_spec, image_size, transforms[dataset_spec.name])
+      backend = Backend(dataset_spec=dataset_spec,
+                        split=split,
+                        image_size=image_size,
+                        transforms=transforms[dataset_spec.name])
 
     dataset = EpisodicClassDataset(backend, dataset_spec, split, sampler,
                                    epoch_size, pool,

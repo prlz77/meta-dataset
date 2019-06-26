@@ -11,6 +11,8 @@ from meta_dataset.datasets.episodic_dataloader import EpisodicDataLoader
 from torch import multiprocessing
 from torch.utils.data import Dataset
 from tqdm import tqdm
+from meta_dataset.utils.argparse import argparse
+FLAGS = argparse.FLAGS
 
 resource.setrlimit(
   resource.RLIMIT_CORE,
@@ -104,11 +106,11 @@ class ClassDataset(Dataset):
       self.offset = 0
       self.split = "train"
     elif split == Split.VALID:
-      self.offset = dataset_spec.classes_per_split[Split.TRAIN]
+      self.offset = len(dataset_spec.get_classes(Split.TRAIN))
       self.split = "valid"
     elif split == Split.TEST:
-      self.offset = dataset_spec.classes_per_split[Split.TRAIN] + \
-                    dataset_spec.classes_per_split[Split.VALID]
+      self.offset = len(dataset_spec.get_classes(Split.TRAIN)) + \
+                    len(dataset_spec.get_classes(Split.VALID))
       self.split = "test"
 
     logging.info("Loaded %s split of %s: %d classes" % (split, self.name, self.num_classes))
@@ -177,8 +179,8 @@ class ClassDataset(Dataset):
     queue.put(1)
     nworkers = 32
     last = nworkers + 1
-
-    with multiprocessing.Pool(nworkers, initializer=init_fn, initargs=(get_random_initializer(), queue, self, last)) as pool:
+    seed = FLAGS.random_seed if FLAGS.random_seed is not None else get_random_initializer()
+    with multiprocessing.Pool(nworkers, initializer=init_fn, initargs=(seed, queue, self, last)) as pool:
       _cache = pool.map_async(build_episode_indices, range(epochs))
       for _ in tqdm(range(epochs)):
         queue.get(block=True)

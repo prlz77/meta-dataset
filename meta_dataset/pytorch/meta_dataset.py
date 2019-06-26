@@ -341,7 +341,7 @@ class MetaDataset(object):
       for source in sorted(sources):
         with open(source, 'rb') as infile:
           m.update(infile.read())
-      critical_flags = []
+      critical_flags = ["random_seed"]
       for flag in critical_flags:
         m.update(str(getattr(FLAGS, flag)).encode())
 
@@ -378,8 +378,10 @@ class MetaDataset(object):
 
     epoch_size = self.learn_config.validate_every if split == "train" else self.learn_config.num_eval_episodes
 
-    use_dag_ontology = has_dag_ontology[0]
     if len(dataset_spec_list) == 1:
+      use_dag_ontology = has_dag_ontology[0]
+#      if self.eval_finegrainedness or self.eval_imbalance_dataset:
+#        use_dag_ontology = False
       dataset = datasets_lib.make_one_source_episode_dataset(
         dataset_spec_list[0],
         use_dag_ontology=use_dag_ontology,
@@ -395,8 +397,8 @@ class MetaDataset(object):
     elif len(dataset_spec_list) > 1:
       dataset = datasets_lib.make_multisource_episode_dataset(
         dataset_spec_list,
-        use_dag_ontology=use_dag_ontology,
-        use_bilevel_ontology=has_bilevel_ontology,
+        use_dag_ontology_list=has_dag_ontology,
+        use_bilevel_ontology_list=has_bilevel_ontology,
         split=dataset_split,
         epoch_size=epoch_size,
         image_size=image_shape,
