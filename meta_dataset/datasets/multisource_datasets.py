@@ -32,6 +32,16 @@ class MultisourceEpisodeDataset(Dataset):
               dataset.offset = offset
               offset += dataset.num_classes
 
+    def set_epoch(self, epoch):
+        """ Sets the epoch from which to start reading episodes
+
+        Args:
+            epoch: epoch number
+
+        """
+        for dataset in self.datasets:
+            dataset.set_epoch(epoch)
+
     def load_save_cache(self, cache_folder, epochs):
         """ Generates batch/episode indices and saves them into a torch file
 
