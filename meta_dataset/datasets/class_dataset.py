@@ -317,6 +317,15 @@ class EpisodicClassDataset(ClassDataset):
       self.episodes.append((total_support, total_query, self.name, episode))
     return self.episodes
 
+  def set_epoch(self, epoch):
+    """ Sets the epoch from which to start reading episodes
+
+    Args:
+        epoch: epoch number
+
+    """
+    self.episodes = self.episodes[(epoch + 1):]
+
   def __getitem__(self, item):
     """Reads an episode and returns it
 
