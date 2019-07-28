@@ -1,3 +1,4 @@
+# 42.8 % on test
 include 'meta_dataset_pytorch/meta_dataset/learn/gin/setups/imagenet.gin'
 
 include 'meta_dataset_pytorch/meta_dataset/learn/gin/models/baseline_config.gin'

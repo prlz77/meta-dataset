@@ -47,7 +47,7 @@ class RandomAccessHdf5Backend(BaseBackend):
             is slightly different from the theoretical one.
     """
 
-    self.path = os.path.join(dataset_spec.path, "{}.h5".format(dataset_spec.name))
+    self.path = dataset_spec.path
     self.image_size = image_size
     self.transforms = transforms_lib.Compose([transforms_lib.Lambda(imdecode), transforms])
     self.split = split
@@ -110,8 +110,8 @@ class RandomAccessHdf5Backend(BaseBackend):
 
     unique_indices = np.unique(indices)
     sorted_indices = np.sort(unique_indices).tolist()
-    with h5py.File(self.path, 'r') as h5fp:
-      dataset = h5fp[class_id]
+    with h5py.File(os.path.join(self.path, "{}.h5".format(class_id)), 'r') as h5fp:
+      dataset = h5fp["images"]
       images = dataset[sorted_indices, ...]
     images = [self.transforms(im) for im in images]
 

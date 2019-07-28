@@ -82,6 +82,7 @@ class ClassDataset(Dataset):
     self.class_set = list(dataset_spec.get_classes(split))
     self.num_classes = len(self.class_set)
     self.backend = backend
+    self.start_epoch = None
 
     """ 
     The dataset offset is modified by a Multisource Datataset
@@ -117,6 +118,15 @@ class ClassDataset(Dataset):
 
   def setup(self, worker_id):
     self.backend.setup(worker_id)
+
+  def set_epoch(self, epoch):
+    """ Sets the epoch from which to start reading episodes
+
+    Args:
+        epoch: epoch number
+
+    """
+    self.start_epoch = epoch + 1
 
   def build_episode_indices(self):
     """Pre-computes the indices and labels of the images to load during an
@@ -238,6 +248,9 @@ class EpisodicClassDataset(ClassDataset):
     epoch avoids using random seeds on the worker threads
     """
     if self.cache is not None:
+      if self.start_epoch is not None:
+        self.cache = self.cache[self.start_epoch:] # To avoid repeating data
+        self.start_epoch = None
       self.episodes = self.cache.pop(0)
       return self.episodes
 
@@ -348,6 +361,7 @@ class BatchClassDataset(ClassDataset):
     epoch avoids using random seeds on the worker threads
     """
     if self.cache is not None:
+
       self.batches = self.cache.pop(0)
       return self.batches
 
